@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -138,11 +139,20 @@ celerybeat.pid
 .env
 .envrc
 .venv
+=======
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+>>>>>>> c627511 (Initial commit)
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+<<<<<<< HEAD
 
 # Spyder project settings
 .spyderproject
@@ -205,3 +215,79 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+=======
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Virtual environments
+.venv/
+virtualenv/
+.pyenv/
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Video files (test data, outputs)
+test_videos/
+test_data/
+sample_videos/
+*_reencoded.*
+*_reencoded/
+output/
+encoded/
+converted/
+
+# Common video extensions (uncomment if you don't want to commit any videos)
+# *.mp4
+# *.mkv
+# *.avi
+# *.mov
+# *.wmv
+# *.flv
+# *.webm
+# *.m4v
+# *.mpg
+# *.mpeg
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+cache/
+
+# Logs and reports
+*.log
+logs/
+reports/
+duplicate_report.txt
+encoding_report.txt
+
+# Documentation builds
+docs/_build/
+site/
+>>>>>>> c627511 (Initial commit)
