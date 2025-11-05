@@ -84,6 +84,12 @@ def main():
     )
 
     parser.add_argument(
+        '--file-types',
+        type=str,
+        help='Filter re-encoding to specific file types (comma-separated, e.g., "wmv,avi,mov")'
+    )
+
+    parser.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output'
@@ -179,15 +185,45 @@ def main():
             print("(Using smart quality matching to preserve visual quality)")
             print("="*80)
 
-            videos_to_encode = [v[0] for v in non_compliant_videos]
-            video_infos_dict = {v[0]: v[1] for v in non_compliant_videos}
+            # Filter by file types if specified
+            videos_to_encode_tuples = non_compliant_videos
+            if args.file_types:
+                # Parse file types (remove dots and convert to lowercase)
+                target_extensions = [
+                    ext.strip().lower().lstrip('.')
+                    for ext in args.file_types.split(',')
+                ]
 
-            encoder.batch_re_encode(
-                videos_to_encode,
-                output_dir=args.output_dir,
-                target_codec=args.target_codec,
-                video_infos=video_infos_dict
-            )
+                # Filter videos by extension
+                filtered_videos = [
+                    (path, info) for path, info in non_compliant_videos
+                    if path.suffix.lower().lstrip('.') in target_extensions
+                ]
+
+                skipped_count = len(non_compliant_videos) - len(filtered_videos)
+
+                print()
+                print(f"File type filter: {', '.join(target_extensions).upper()}")
+                print(f"Videos matching filter: {len(filtered_videos)}")
+                if skipped_count > 0:
+                    print(f"Videos skipped (other formats): {skipped_count}")
+                print()
+
+                videos_to_encode_tuples = filtered_videos
+
+            if not videos_to_encode_tuples:
+                print("No videos match the file type filter.")
+                print()
+            else:
+                videos_to_encode = [v[0] for v in videos_to_encode_tuples]
+                video_infos_dict = {v[0]: v[1] for v in videos_to_encode_tuples}
+
+                encoder.batch_re_encode(
+                    videos_to_encode,
+                    output_dir=args.output_dir,
+                    target_codec=args.target_codec,
+                    video_infos=video_infos_dict
+                )
 
     # Find duplicates
     if args.find_duplicates:
