@@ -4,6 +4,8 @@ Video encoding module for re-encoding videos to modern specifications
 
 import subprocess
 import json
+import re
+import sys
 from pathlib import Path
 from typing import Optional, Dict
 from tqdm import tqdm
@@ -37,6 +39,52 @@ class VideoEncoder:
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+
+    def _parse_ffmpeg_progress(self, line: str) -> Optional[Dict[str, str]]:
+        """
+        Parse FFmpeg progress output line
+
+        FFmpeg outputs progress in format:
+        frame=  123 fps= 45 q=28.0 size=    1024kB time=00:00:05.12 bitrate=1234.5kbits/s speed=1.23x
+
+        Args:
+            line: Output line from FFmpeg
+
+        Returns:
+            Dictionary with progress info, or None if not a progress line
+        """
+        # FFmpeg progress lines contain 'frame=' and other metrics
+        if 'frame=' not in line:
+            return None
+
+        progress = {}
+
+        # Extract frame number
+        frame_match = re.search(r'frame=\s*(\d+)', line)
+        if frame_match:
+            progress['frame'] = frame_match.group(1)
+
+        # Extract fps
+        fps_match = re.search(r'fps=\s*([\d.]+)', line)
+        if fps_match:
+            progress['fps'] = fps_match.group(1)
+
+        # Extract speed
+        speed_match = re.search(r'speed=\s*([\d.]+)x', line)
+        if speed_match:
+            progress['speed'] = speed_match.group(1)
+
+        # Extract time
+        time_match = re.search(r'time=(\d+:\d+:[\d.]+)', line)
+        if time_match:
+            progress['time'] = time_match.group(1)
+
+        # Extract bitrate
+        bitrate_match = re.search(r'bitrate=\s*([\d.]+\w+/s)', line)
+        if bitrate_match:
+            progress['bitrate'] = bitrate_match.group(1)
+
+        return progress if progress else None
 
     def calculate_optimal_crf(self, video_info: VideoInfo, target_codec: str = 'hevc') -> int:
         """
@@ -135,7 +183,9 @@ class VideoEncoder:
         audio_codec: str = 'aac',
         keep_original: bool = True,
         replace_original: bool = False,
-        video_info: Optional[VideoInfo] = None
+        video_info: Optional[VideoInfo] = None,
+        current_index: Optional[int] = None,
+        total_count: Optional[int] = None
     ) -> bool:
         """
         Re-encode a video file with smart quality matching
@@ -151,6 +201,8 @@ class VideoEncoder:
             keep_original: Whether to keep the original file (deprecated, use replace_original)
             replace_original: If True, deletes source and renames output to match source filename
             video_info: VideoInfo object for smart quality matching (optional)
+            current_index: Current video index in batch (1-based, for display)
+            total_count: Total number of videos in batch (for display)
 
         Returns:
             True if encoding successful, False otherwise
@@ -179,93 +231,194 @@ class VideoEncoder:
         # Create output directory if it doesn't exist
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Clean up any existing output file (from previous failed/interrupted encodes)
+        # Check for valid existing output (resume support)
+        skip_encoding = False
         if output_path.exists():
             existing_size = output_path.stat().st_size
             if self.verbose:
-                tqdm.write(f"  Found existing output file ({existing_size / (1024*1024):.1f} MB), will overwrite")
+                tqdm.write(f"  Found existing output file ({existing_size / (1024*1024):.1f} MB)")
 
-            # Optionally validate existing file - if it's valid, skip re-encoding
+            # Validate existing file - if it's valid, skip re-encoding
             if self._validate_output(output_path, video_info):
                 if self.verbose:
                     tqdm.write(f"  Existing output is valid, skipping re-encode")
-                return True
+                skip_encoding = True
             else:
                 if self.verbose:
                     tqdm.write(f"  Existing output is invalid, removing and re-encoding")
                 output_path.unlink()
 
-        # Build ffmpeg command
-        cmd = [
-            'ffmpeg',
-            '-loglevel', 'error' if not self.verbose else 'info',
-            '-i', str(input_path),
-            '-c:v', ffmpeg_codec,
-            '-preset', preset,
-            '-crf', str(crf),
-            '-c:a', audio_codec,
-            '-y',  # Overwrite output file if exists
-            str(output_path)
-        ]
+        # If we're replacing originals, check if replacement was already completed
+        if replace_original and not skip_encoding:
+            # Calculate what the final path would be
+            target_extension = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+            final_path = input_path.parent / (input_path.stem + target_extension)
 
-        # Add codec-specific parameters
-        if target_codec.lower() == 'hevc':
-            # Add macOS QuickLook compatibility
-            # Use hvc1 tag instead of hev1 for Apple device compatibility
-            cmd.insert(-1, '-tag:v')
-            cmd.insert(-1, 'hvc1')
-            # Ensure yuv420p pixel format for maximum compatibility
-            cmd.insert(-1, '-pix_fmt')
-            cmd.insert(-1, 'yuv420p')
-            # Add movflags for better QuickLook compatibility
-            cmd.insert(-1, '-movflags')
-            cmd.insert(-1, 'faststart')
-            # Add x265-params for better HEVC encoding
-            cmd.insert(-1, '-x265-params')
-            cmd.insert(-1, 'log-level=error')
-        elif target_codec.lower() == 'h264':
-            # Add H.264-specific parameters for maximum compatibility
-            cmd.insert(-1, '-pix_fmt')
-            cmd.insert(-1, 'yuv420p')
-            # Add movflags for better QuickLook compatibility
-            cmd.insert(-1, '-movflags')
-            cmd.insert(-1, 'faststart')
-        elif target_codec.lower() == 'av1':
-            # Add AV1-specific parameters
-            cmd.insert(-1, '-cpu-used')
-            cmd.insert(-1, '4')  # Balance between speed and quality
-            # Add movflags for better QuickLook compatibility
-            cmd.insert(-1, '-movflags')
-            cmd.insert(-1, 'faststart')
+            # If the final path exists and original doesn't, replacement was completed
+            if final_path.exists() and final_path != input_path and not input_path.exists():
+                if self.verbose:
+                    tqdm.write(f"  Replacement already completed, skipping")
+                return True
+
+            # If final path exists and is valid, and it's the same as output path,
+            # but original still exists, we need to remove the original
+            if final_path.exists() and final_path == output_path and input_path.exists() and input_path != final_path:
+                if self._validate_output(final_path, video_info):
+                    if self.verbose:
+                        tqdm.write(f"  Found valid final output, completing interrupted replacement")
+                    input_path.unlink()
+                    return True
+
+        # Only encode if we don't have a valid existing output
+        if not skip_encoding:
+            # Build ffmpeg command
+            # Use 'stats' loglevel to get progress info, or 'info' for verbose mode
+            loglevel = 'info' if self.verbose else 'error'
+            cmd = [
+                'ffmpeg',
+                '-loglevel', loglevel,
+                '-stats',  # Enable progress stats
+                '-i', str(input_path),
+                '-c:v', ffmpeg_codec,
+                '-preset', preset,
+                '-crf', str(crf),
+                '-c:a', audio_codec,
+                '-y',  # Overwrite output file if exists
+                str(output_path)
+            ]
+
+            # Add codec-specific parameters
+            if target_codec.lower() == 'hevc':
+                # Add macOS QuickLook compatibility
+                # Use hvc1 tag instead of hev1 for Apple device compatibility
+                cmd.insert(-1, '-tag:v')
+                cmd.insert(-1, 'hvc1')
+                # Ensure yuv420p pixel format for maximum compatibility
+                cmd.insert(-1, '-pix_fmt')
+                cmd.insert(-1, 'yuv420p')
+                # Add movflags for better QuickLook compatibility
+                cmd.insert(-1, '-movflags')
+                cmd.insert(-1, 'faststart')
+                # Add x265-params for better HEVC encoding
+                cmd.insert(-1, '-x265-params')
+                cmd.insert(-1, 'log-level=error')
+            elif target_codec.lower() == 'h264':
+                # Add H.264-specific parameters for maximum compatibility
+                cmd.insert(-1, '-pix_fmt')
+                cmd.insert(-1, 'yuv420p')
+                # Add movflags for better QuickLook compatibility
+                cmd.insert(-1, '-movflags')
+                cmd.insert(-1, 'faststart')
+            elif target_codec.lower() == 'av1':
+                # Add AV1-specific parameters
+                cmd.insert(-1, '-cpu-used')
+                cmd.insert(-1, '4')  # Balance between speed and quality
+                # Add movflags for better QuickLook compatibility
+                cmd.insert(-1, '-movflags')
+                cmd.insert(-1, 'faststart')
 
         try:
-            if self.verbose:
-                print(f"Encoding: {input_path.name} -> {output_path.name}")
-                print(f"Command: {' '.join(cmd)}")
+            if not skip_encoding:
+                # Display which file we're encoding with position in queue
+                if current_index and total_count:
+                    tqdm.write(f"\n[{current_index}/{total_count}] Encoding: {input_path.name}")
+                else:
+                    tqdm.write(f"\nEncoding: {input_path.name}")
 
-            # Run ffmpeg
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=None  # No timeout for encoding (can take a while)
-            )
+                if self.verbose:
+                    tqdm.write(f"  Output: {output_path.name}")
+                    tqdm.write(f"  Command: {' '.join(cmd)}")
 
-            if result.returncode != 0:
-                if result.stderr:
-                    tqdm.write(f"Error encoding {input_path.name}: {result.stderr.strip()}")
-                return False
+                # Run ffmpeg with streaming output to show real-time progress
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                    bufsize=1  # Line buffered
+                )
 
-            # Validate output before considering it successful
-            if not self._validate_output(output_path, video_info):
-                tqdm.write(f"Error: Output validation failed for {output_path.name}")
-                # Remove invalid output file
-                if output_path.exists():
-                    output_path.unlink()
-                return False
+                # Track progress
+                last_progress = None
+                error_output = []
 
-            if self.verbose:
-                tqdm.write(f"Successfully encoded and validated: {output_path}")
+                # Read stderr line by line (FFmpeg writes progress to stderr)
+                while True:
+                    line = process.stderr.readline()
+                    if not line:
+                        break
+
+                    # Store for error reporting
+                    error_output.append(line)
+
+                    # Parse progress info
+                    progress = self._parse_ffmpeg_progress(line)
+                    if progress:
+                        last_progress = progress
+                        # Display progress inline (overwrite same line)
+                        fps = progress.get('fps', '?')
+                        speed = progress.get('speed', '?')
+                        time = progress.get('time', '?')
+                        frame = progress.get('frame', '?')
+
+                        # Create progress message
+                        progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
+
+                        # Use print with carriage return to overwrite the same line
+                        # Clear line first, then write progress
+                        print(f"\r{progress_msg:<80}", end='', flush=True)
+                    elif self.verbose and line.strip():
+                        # In verbose mode, show other messages too
+                        # Need to clear the progress line first
+                        print("\r" + " " * 80 + "\r", end='')
+                        tqdm.write(f"  {line.rstrip()}")
+
+                # Wait for process to complete
+                process.wait()
+
+                # Print newline after progress updates to move to next line
+                if last_progress:
+                    print()  # New line after progress
+
+                # Check return code
+                if process.returncode != 0:
+                    if current_index and total_count:
+                        tqdm.write(f"✗ [{current_index}/{total_count}] Error encoding {input_path.name}")
+                    else:
+                        tqdm.write(f"Error encoding {input_path.name}")
+                    # Show last few error lines
+                    for line in error_output[-10:]:
+                        if line.strip():
+                            tqdm.write(f"  {line.rstrip()}")
+                    return False
+
+                # Validate output before considering it successful
+                if not self._validate_output(output_path, video_info):
+                    if current_index and total_count:
+                        tqdm.write(f"✗ [{current_index}/{total_count}] Output validation failed for {input_path.name}")
+                    else:
+                        tqdm.write(f"Error: Output validation failed for {output_path.name}")
+                    # Remove invalid output file
+                    if output_path.exists():
+                        output_path.unlink()
+                    return False
+
+                # Show final encoding stats
+                if last_progress:
+                    fps = last_progress.get('fps', '?')
+                    speed = last_progress.get('speed', '?')
+                    if current_index and total_count:
+                        tqdm.write(f"✓ [{current_index}/{total_count}] Completed: {input_path.name} (avg {fps} fps, {speed}x speed)")
+                    else:
+                        tqdm.write(f"✓ Completed: {input_path.name} (avg {fps} fps, {speed}x speed)")
+                elif self.verbose:
+                    tqdm.write(f"Successfully encoded and validated: {output_path}")
+            else:
+                # Skipped encoding, but show we're resuming
+                if current_index and total_count:
+                    tqdm.write(f"\n[{current_index}/{total_count}] Resuming: {input_path.name} (already encoded)")
+                else:
+                    tqdm.write(f"\nResuming: {input_path.name} (already encoded)")
 
             # Handle file replacement logic (only after successful validation)
             if replace_original:
@@ -465,8 +618,9 @@ class VideoEncoder:
             Dictionary mapping input paths to success status
         """
         results = {}
+        total = len(video_paths)
 
-        for video_path in tqdm(video_paths, desc="Re-encoding videos", unit="video"):
+        for idx, video_path in enumerate(video_paths, start=1):
             output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
 
             # Get video info for this video if available
@@ -477,15 +631,16 @@ class VideoEncoder:
                 output_path,
                 target_codec=target_codec,
                 video_info=video_info,
+                current_index=idx,
+                total_count=total,
                 **kwargs
             )
 
             results[video_path] = success
 
-            if success:
-                tqdm.write(f"✓ {video_path.name}")
-            else:
-                tqdm.write(f"✗ {video_path.name} - Failed")
+            # Don't duplicate the success message (already shown in re_encode_video)
+            if not success:
+                tqdm.write(f"✗ [{idx}/{total}] Failed: {video_path.name}")
 
         # Print summary
         successful = sum(1 for v in results.values() if v)

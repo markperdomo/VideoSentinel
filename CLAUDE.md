@@ -37,6 +37,7 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode
 python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
 
 # Replace original files with re-encoded versions (deletes source, renames output)
+# Safe to interrupt and resume - automatically detects completed/partial work
 python video_sentinel.py /path/to/videos --check-specs --re-encode --replace-original
 
 # Recursive scan
@@ -125,7 +126,7 @@ Before deleting or replacing files, the encoder validates outputs:
 4. Duration matches source within ±2 seconds
 5. If validation fails, deletes invalid output and preserves original
 
-**Replace Original Mode** (encoder.py:258-285)
+**Replace Original Mode with Smart Resume** (encoder.py:234-270, 392-445)
 When `--replace-original` flag is used, the encoder:
 1. Encodes to temporary output path with `_reencoded` suffix
 2. Validates the output thoroughly
@@ -134,6 +135,25 @@ When `--replace-original` flag is used, the encoder:
    - Renames output to match original filename (but with proper extension)
 4. Example: `video.avi` → encode to `video_reencoded.mp4` → delete `video.avi` → rename to `video.mp4`
 5. Extension is determined by target codec (all codecs currently use `.mp4`)
+
+**Smart Resume Support** (encoder.py:234-270):
+If the process is interrupted, the encoder intelligently resumes:
+1. Checks if a valid `_reencoded` output already exists from previous run
+2. If found and valid, skips re-encoding and completes the replacement
+3. Detects if replacement was already completed (original deleted, final file exists)
+4. Shows "Resuming: video.mp4 (already encoded)" instead of wasting time re-encoding
+5. Never re-encodes files that are already successfully encoded
+6. Validates outputs before considering them complete to avoid using corrupted partial files
+
+**Real-Time Encoding Progress** (encoder.py:43-87, 296-390)
+During video encoding, the encoder displays live progress information with queue position:
+1. Shows position in batch: `[1/5] Encoding: video.wmv`
+2. Parses FFmpeg's stderr output in real-time using regex patterns
+3. Extracts key metrics: frame count, fps (encoding speed), time position, speed multiplier
+4. Displays progress inline with carriage returns (overwrites same line)
+5. Shows final stats: `✓ [1/5] Completed: video.wmv (avg 45.2 fps, 1.8x speed)`
+6. Format: `Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x`
+7. Error messages also include position: `✗ [1/5] Error encoding video.wmv`
 
 ### Dependencies
 
@@ -160,10 +180,12 @@ Python dependencies (requirements.txt):
 - Trade-off between encoding speed and compression efficiency
 - Default: medium (balanced)
 
-**macOS QuickLook Compatibility** (encoder.py:203-213)
-- HEVC videos use `-tag:v hvc1` (not default `hev1`) for Apple device compatibility
-- Forces `-pix_fmt yuv420p` for maximum player compatibility
-- Without these parameters, HEVC videos won't preview in macOS Finder/QuickLook
+**macOS QuickLook Compatibility** (encoder.py:263-290)
+- **All output videos use MP4 container** (never preserves source extension like .avi, .wmv)
+- **HEVC**: Uses `-tag:v hvc1` (not default `hev1`) for Apple compatibility
+- **All codecs**: Forces `-pix_fmt yuv420p` for maximum player compatibility
+- **All codecs**: Uses `-movflags faststart` to move metadata to file start for instant QuickLook previews
+- Without these parameters, videos may not preview properly in macOS Finder/QuickLook
 
 **Codec Mappings** (encoder.py:17-21)
 - h264 → libx264 (FFmpeg encoder)
@@ -180,6 +202,43 @@ Supported: .mp4, .mkv, .avi, .mov, .wmv, .flv, .webm, .m4v, .mpg, .mpeg
 - Duration tolerance: ±2 seconds when validating re-encoded videos
 - Timeout: 300 seconds (5 minutes) for integrity checks
 - Files are only deleted after successful encoding and validation
+
+## Usage Tips
+
+### Interrupting and Resuming Batch Encoding
+
+The encoder supports safe interruption and intelligent resume:
+
+**Safe to interrupt at any time:**
+- Press Ctrl+C to stop encoding
+- No corrupted files will be used (validation ensures integrity)
+- Partial encodes are automatically detected and removed
+
+**Automatic resume on restart:**
+```bash
+# Start batch encoding
+python video_sentinel.py /videos --re-encode --replace-original
+
+# Interrupt with Ctrl+C after some files complete
+
+# Resume - automatically skips completed files
+python video_sentinel.py /videos --re-encode --replace-original
+```
+
+**What happens on resume:**
+1. ✓ Detects valid `_reencoded` files from previous run
+2. ✓ Skips re-encoding those files (shows "Resuming: file.avi (already encoded)")
+3. ✓ Completes any interrupted replacements
+4. ✓ Continues encoding remaining files
+5. ✓ Validates all outputs before using them
+
+**Resume behavior examples:**
+- **Completed encode, not replaced:** Skips encoding, completes replacement
+- **Fully completed:** Shows "Replacement already completed, skipping"
+- **Partial/corrupted encode:** Deletes invalid file, re-encodes from scratch
+- **Never encoded:** Encodes normally
+
+This means you can safely interrupt large batch jobs and resume without wasting work!
 
 ## Common Development Patterns
 
