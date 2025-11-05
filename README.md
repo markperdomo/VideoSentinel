@@ -1,14 +1,39 @@
 # VideoSentinel
 
-A Python command-line utility for managing and validating video libraries. Ensures videos are properly encoded to modern specifications, detects duplicates, and identifies encoding issues.
+A Python command-line utility for managing and validating video libraries. Ensures videos are properly encoded to modern specifications (H.265/HEVC), detects duplicates using perceptual hashing, identifies encoding issues, and safely re-encodes videos with intelligent quality matching. Supports batch processing with smart resume capabilities.
 
 ## Features
 
 - **Encoding Validation**: Check if videos meet modern encoding standards (H.265/HEVC by default)
 - **Advanced Duplicate Detection**: Find duplicate videos using multi-frame perceptual hashing (detects similar content even with different encoding, resolution, or quality)
 - **Issue Detection**: Identify corrupted files, incomplete videos, and encoding problems
-- **Auto Re-encoding**: Automatically re-encode videos to modern specifications with smart quality matching
+- **Smart Re-encoding**: Automatically re-encode videos to modern specifications with intelligent quality matching based on source bitrate
+- **Replace Original Mode**: Safely replace original files with re-encoded versions after thorough validation
+- **Smart Resume Support**: Interrupt and resume batch encoding jobs without losing progress
+- **Real-Time Progress**: Live encoding statistics with queue position, fps, speed multiplier, and time position
+- **File Type Filtering**: Target specific legacy formats (wmv, avi, mov) for selective re-encoding
+- **macOS QuickLook Compatible**: All outputs optimized for instant preview in macOS Finder
 - **Flexible CLI**: Multiple operation modes with configurable options
+
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Basic Usage](#basic-usage)
+  - [Specific Operations](#specific-operations)
+  - [Re-encoding](#re-encoding)
+  - [Additional Options](#additional-options)
+- [Examples](#examples)
+- [Modern Encoding Specs](#modern-encoding-specs)
+- [Smart Quality Matching](#smart-quality-matching)
+- [Re-encoding Safety Measures](#re-encoding-safety-measures)
+  - [Replace Original Mode](#replace-original-mode)
+  - [macOS QuickLook Compatibility](#macos-quicklook-compatibility)
+  - [Interrupting and Resuming Batch Jobs](#interrupting-and-resuming-batch-jobs)
+- [Advanced Duplicate Detection](#advanced-duplicate-detection)
+- [How Broken Video Detection Works](#how-broken-video-detection-works)
+- [License](#license)
 
 ## Requirements
 
@@ -68,9 +93,19 @@ python video_sentinel.py /path/to/videos --check-issues
 
 ### Re-encoding
 
-Re-encode videos that don't meet specs:
+Re-encode videos that don't meet specs (keeps originals with `_reencoded` suffix):
 ```bash
 python video_sentinel.py /path/to/videos --check-specs --re-encode
+```
+
+Re-encode only specific file types (great for cleaning up legacy formats):
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
+```
+
+Replace original files with re-encoded versions (safe to interrupt and resume):
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --replace-original
 ```
 
 Specify output directory for re-encoded videos:
@@ -88,13 +123,20 @@ python video_sentinel.py /path/to/videos --re-encode --target-codec hevc
 - `-r, --recursive`: Scan subdirectories recursively
 - `-v, --verbose`: Enable verbose output
 - `--target-codec {h264,hevc,av1}`: Target codec for re-encoding (default: hevc)
+- `--file-types`: Filter re-encoding to specific file types (comma-separated, e.g., "wmv,avi,mov")
+- `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
 - `--deep-scan`: Perform deep integrity check by decoding entire videos (slower but more thorough)
 
 ## Examples
 
-Scan videos recursively and re-encode non-compliant ones:
+Scan videos recursively and re-encode non-compliant ones (keeps originals):
 ```bash
 python video_sentinel.py ~/Videos -r --check-specs --re-encode
+```
+
+Clean up legacy formats by re-encoding specific file types and replacing originals:
+```bash
+python video_sentinel.py ~/Videos -r --check-specs --re-encode --file-types wmv,avi,mov --replace-original
 ```
 
 Find duplicates in a large library:
@@ -105,6 +147,11 @@ python video_sentinel.py /media/library -r --find-duplicates
 Run all checks with verbose output:
 ```bash
 python video_sentinel.py /path/to/videos -r -v
+```
+
+Perform deep scan to find corrupted videos:
+```bash
+python video_sentinel.py ~/Videos -r --check-issues --deep-scan
 ```
 
 ## Modern Encoding Specs
@@ -152,6 +199,34 @@ Uses higher CRF values (20-32 range) since AV1 has superior compression efficien
 - **Space Efficiency**: Low-quality sources don't waste space with unnecessarily low CRF
 - **Smart Compression**: Leverages modern codec efficiency (HEVC typically 40-50% smaller than H.264)
 - **Automatic**: No manual quality tuning needed
+
+### Real-Time Encoding Progress
+
+During batch encoding, VideoSentinel displays live progress information with queue position and encoding statistics:
+
+**Progress display format:**
+```
+[1/5] Encoding: video.wmv - frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
+```
+
+**What it shows:**
+- **Queue position:** `[1/5]` = encoding video 1 of 5
+- **Current frame:** Number of frames encoded so far
+- **Encoding speed:** Frames per second (fps) being processed
+- **Time position:** Current position in the video being encoded
+- **Speed multiplier:** How fast encoding is compared to real-time (1.8x = encoding 1.8× faster than playback)
+
+**Completion messages:**
+```
+✓ [1/5] Completed: video.wmv (avg 45.2 fps, 1.8x speed)
+✗ [1/5] Error encoding video.wmv: validation failed
+```
+
+This helps you:
+- Track progress in large batch operations
+- Estimate remaining time
+- Identify slow-encoding videos
+- Monitor encoding efficiency
 
 ### Example
 
@@ -267,51 +342,110 @@ In this case:
 4. **Review results**: Check summary to see success/failure count
 5. **Verify manually**: Spot-check a few re-encoded videos before bulk deletion
 
-### Advanced: Removing Originals
+### Replace Original Mode
 
-If you want to replace originals (not recommended without thorough testing), you would need to manually delete them after verifying the re-encoded versions are satisfactory. The tool intentionally makes this a manual process to prevent accidental data loss.
+For production use after thorough testing, VideoSentinel supports replacing original files with re-encoded versions using the `--replace-original` flag:
 
-### Resume Behavior
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --replace-original
+```
 
-VideoSentinel intelligently handles interrupted or failed encodings:
+**How it works:**
+1. Encodes to temporary file with `_reencoded` suffix (e.g., `video.avi` → `video_reencoded.mp4`)
+2. Thoroughly validates the output (same validation as above)
+3. Only after successful validation:
+   - Deletes the original source file
+   - Renames output to match original filename (with proper extension)
+4. Example: `video.avi` → encode to `video_reencoded.mp4` → delete `video.avi` → rename to `video.mp4`
 
-**If output file already exists:**
-1. Validates the existing output file
-2. If **valid** → Skips re-encoding (smart resume)
-3. If **invalid** → Deletes it and re-encodes
+**Safety features:**
+- Validation must pass before any deletion occurs
+- Original is preserved if encoding or validation fails
+- All output videos use `.mp4` extension for maximum compatibility
+- HEVC videos include macOS QuickLook compatibility tags (`-tag:v hvc1`)
+
+**Safe to interrupt:** You can press Ctrl+C at any time. Partial encodes are automatically detected and cleaned up on resume.
+
+### macOS QuickLook Compatibility
+
+All re-encoded videos are optimized for maximum compatibility, especially with macOS QuickLook (Finder preview):
+
+**Compatibility features:**
+- **MP4 container:** All outputs use `.mp4` regardless of source format (never `.avi`, `.wmv`, etc.)
+- **HEVC tag:** HEVC videos use `-tag:v hvc1` instead of default `hev1` for Apple device compatibility
+- **Pixel format:** Forces `yuv420p` for universal player support
+- **Fast start:** Moves metadata to file beginning with `-movflags faststart` for instant previews
+
+**Why this matters:**
+- Videos preview instantly in macOS Finder without opening an app
+- Compatible with QuickTime Player, iOS devices, and Apple TV
+- Works with spacebar preview in Finder
+- No "codec not supported" errors on Apple devices
+
+Without these optimizations, HEVC videos may not preview in macOS QuickLook even though they're valid files. VideoSentinel handles this automatically.
+
+### Interrupting and Resuming Batch Jobs
+
+VideoSentinel is designed to handle interruptions gracefully, especially when using `--replace-original`:
+
+**Safe to interrupt at any time:**
+- Press Ctrl+C to stop encoding
+- No corrupted files will be kept (validation ensures integrity)
+- Partial encodes are automatically detected and removed on next run
+
+**Automatic resume on restart:**
+```bash
+# Start batch encoding with replacement
+python video_sentinel.py /videos --re-encode --replace-original
+
+# Interrupt with Ctrl+C after some files complete
+
+# Resume - automatically skips completed files
+python video_sentinel.py /videos --re-encode --replace-original
+```
+
+**What happens on resume:**
+
+1. ✓ **Fully completed:** Shows "Replacement already completed, skipping"
+2. ✓ **Completed encode, not replaced yet:** Skips encoding, completes replacement
+3. ✓ **Partial/corrupted encode:** Deletes invalid file, re-encodes from scratch
+4. ✓ **Never encoded:** Encodes normally
 
 **Example scenarios:**
 
-**Scenario 1: Process interrupted (Ctrl+C, system crash)**
+**Scenario 1: Batch interrupted mid-encode**
 ```
 First run:
-  movie.mp4 → movie_reencoded.mp4 (partial, 50% complete)
-  [Interrupted!]
+  [1/5] video1.avi → Completed ✓
+  [2/5] video2.wmv → Completed ✓
+  [3/5] video3.mov → 50% complete... [Ctrl+C pressed]
 
-Second run:
-  Found existing output file (2.3 GB), will overwrite
-  Existing output is invalid, removing and re-encoding
-  [Encodes from scratch]
+Second run (same command):
+  video1.avi - Replacement already completed, skipping
+  video2.wmv - Replacement already completed, skipping
+  [1/3] Resuming: video3.mov (partial file detected, re-encoding)
+  [2/3] Encoding: video4.avi
+  [3/3] Encoding: video5.wmv
 ```
 
-**Scenario 2: Already successfully encoded**
+**Scenario 2: Encode completed but not replaced**
 ```
 First run:
-  movie.mp4 → movie_reencoded.mp4 (complete, validated)
+  video.avi → video_reencoded.mp4 (completed, validated)
+  [Interrupted before replacement step]
 
 Second run:
-  Found existing output file (4.5 GB), will overwrite
-  Existing output is valid, skipping re-encode
-  ✓ movie.mp4
+  Resuming: video.avi (already encoded)
+  [Completes the replacement: deletes video.avi, renames to video.mp4]
 ```
 
 This means:
-- **Safe to re-run** after interruptions
-- **Skips already-encoded** videos (saves time on large batches)
+- **Safe to re-run** after interruptions without wasting work
+- **Never re-encodes** successfully completed files
 - **Automatically cleans up** partial/broken files
-- **Never overwrites valid** outputs unless source changed
+- **Validates outputs** before considering them complete
 
-**Tip:** Run the same command again after interruptions - it will resume by re-encoding only incomplete videos.
+**Best practice:** For large batch jobs, you can interrupt and resume as needed. The encoder tracks which files are done and picks up where it left off.
 
 ## Advanced Duplicate Detection
 
