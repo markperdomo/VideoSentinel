@@ -201,6 +201,13 @@ class VideoEncoder:
 
         # Add codec-specific parameters
         if target_codec.lower() == 'hevc':
+            # Add macOS QuickLook compatibility
+            # Use hvc1 tag instead of hev1 for Apple device compatibility
+            cmd.insert(-1, '-tag:v')
+            cmd.insert(-1, 'hvc1')
+            # Ensure yuv420p pixel format for maximum compatibility
+            cmd.insert(-1, '-pix_fmt')
+            cmd.insert(-1, 'yuv420p')
             # Add x265-params for better HEVC encoding
             cmd.insert(-1, '-x265-params')
             cmd.insert(-1, 'log-level=error')
