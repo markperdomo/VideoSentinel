@@ -217,13 +217,26 @@ class VideoEncoder:
             # Ensure yuv420p pixel format for maximum compatibility
             cmd.insert(-1, '-pix_fmt')
             cmd.insert(-1, 'yuv420p')
+            # Add movflags for better QuickLook compatibility
+            cmd.insert(-1, '-movflags')
+            cmd.insert(-1, 'faststart')
             # Add x265-params for better HEVC encoding
             cmd.insert(-1, '-x265-params')
             cmd.insert(-1, 'log-level=error')
+        elif target_codec.lower() == 'h264':
+            # Add H.264-specific parameters for maximum compatibility
+            cmd.insert(-1, '-pix_fmt')
+            cmd.insert(-1, 'yuv420p')
+            # Add movflags for better QuickLook compatibility
+            cmd.insert(-1, '-movflags')
+            cmd.insert(-1, 'faststart')
         elif target_codec.lower() == 'av1':
             # Add AV1-specific parameters
             cmd.insert(-1, '-cpu-used')
             cmd.insert(-1, '4')  # Balance between speed and quality
+            # Add movflags for better QuickLook compatibility
+            cmd.insert(-1, '-movflags')
+            cmd.insert(-1, 'faststart')
 
         try:
             if self.verbose:
@@ -402,7 +415,8 @@ class VideoEncoder:
         self,
         input_path: Path,
         output_dir: Optional[Path] = None,
-        suffix: str = '_reencoded'
+        suffix: str = '_reencoded',
+        target_codec: str = 'hevc'
     ) -> Path:
         """
         Generate output path for re-encoded video
@@ -411,17 +425,21 @@ class VideoEncoder:
             input_path: Original video path
             output_dir: Output directory (if None, uses same directory as input)
             suffix: Suffix to add to filename
+            target_codec: Target codec (determines output extension)
 
         Returns:
-            Output path for re-encoded video
+            Output path for re-encoded video (always .mp4 for modern codecs)
         """
+        # Always use .mp4 extension for modern codecs
+        extension = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+
         if output_dir:
             # Use specified output directory
-            filename = input_path.stem + suffix + input_path.suffix
+            filename = input_path.stem + suffix + extension
             return output_dir / filename
         else:
             # Use same directory as input
-            filename = input_path.stem + suffix + input_path.suffix
+            filename = input_path.stem + suffix + extension
             return input_path.parent / filename
 
     def batch_re_encode(
@@ -449,7 +467,7 @@ class VideoEncoder:
         results = {}
 
         for video_path in tqdm(video_paths, desc="Re-encoding videos", unit="video"):
-            output_path = self.get_output_path(video_path, output_dir)
+            output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
 
             # Get video info for this video if available
             video_info = video_infos.get(video_path) if video_infos else None
