@@ -20,6 +20,13 @@ class VideoEncoder:
         'av1': 'libaom-av1'
     }
 
+    # Extension mappings for output files
+    EXTENSION_MAP = {
+        'h264': '.mp4',
+        'hevc': '.mp4',
+        'av1': '.mp4'
+    }
+
     # Preset mappings for encoding speed vs quality
     PRESETS = {
         'fast': 'fast',
@@ -127,6 +134,7 @@ class VideoEncoder:
         crf: Optional[int] = None,
         audio_codec: str = 'aac',
         keep_original: bool = True,
+        replace_original: bool = False,
         video_info: Optional[VideoInfo] = None
     ) -> bool:
         """
@@ -140,7 +148,8 @@ class VideoEncoder:
             crf: Constant Rate Factor for quality (0-51, lower is better quality).
                  If None, automatically calculated based on source quality.
             audio_codec: Audio codec to use
-            keep_original: Whether to keep the original file
+            keep_original: Whether to keep the original file (deprecated, use replace_original)
+            replace_original: If True, deletes source and renames output to match source filename
             video_info: VideoInfo object for smart quality matching (optional)
 
         Returns:
@@ -245,8 +254,37 @@ class VideoEncoder:
             if self.verbose:
                 tqdm.write(f"Successfully encoded and validated: {output_path}")
 
-            # Optionally remove original (only after successful validation)
-            if not keep_original:
+            # Handle file replacement logic (only after successful validation)
+            if replace_original:
+                # Get the proper extension for the target codec
+                target_extension = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+
+                # Create final path with original filename but proper extension
+                final_path = input_path.parent / (input_path.stem + target_extension)
+
+                # If final path is different from output path, we need to rename
+                # (This handles cases where source was .avi and target is .mp4, etc.)
+                if final_path != output_path:
+                    # If a file already exists at final_path, delete it first
+                    # (This handles the case where source was already .mp4)
+                    if final_path.exists():
+                        if self.verbose:
+                            tqdm.write(f"Removing original: {final_path}")
+                        final_path.unlink()
+
+                    # Rename output to final path
+                    if self.verbose:
+                        tqdm.write(f"Renaming {output_path.name} -> {final_path.name}")
+                    output_path.rename(final_path)
+                else:
+                    # Output path already matches desired final path
+                    # Just need to delete the original if it's different
+                    if input_path.exists() and input_path != final_path:
+                        if self.verbose:
+                            tqdm.write(f"Removing original: {input_path}")
+                        input_path.unlink()
+            elif not keep_original:
+                # Legacy behavior: just remove original without renaming
                 if self.verbose:
                     tqdm.write(f"Removing original: {input_path}")
                 input_path.unlink()

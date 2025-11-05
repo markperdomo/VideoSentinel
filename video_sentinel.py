@@ -90,6 +90,12 @@ def main():
     )
 
     parser.add_argument(
+        '--replace-original',
+        action='store_true',
+        help='Replace original files with re-encoded versions (deletes source, renames output)'
+    )
+
+    parser.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output'
@@ -183,6 +189,8 @@ def main():
             print("="*80)
             print("RE-ENCODING NON-COMPLIANT VIDEOS")
             print("(Using smart quality matching to preserve visual quality)")
+            if args.replace_original:
+                print("⚠️  REPLACE MODE: Original files will be deleted and replaced")
             print("="*80)
 
             # Filter by file types if specified
@@ -222,7 +230,8 @@ def main():
                     videos_to_encode,
                     output_dir=args.output_dir,
                     target_codec=args.target_codec,
-                    video_infos=video_infos_dict
+                    video_infos=video_infos_dict,
+                    replace_original=args.replace_original
                 )
 
     # Find duplicates
