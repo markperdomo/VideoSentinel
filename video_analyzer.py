@@ -34,9 +34,9 @@ class VideoAnalyzer:
     # Common video file extensions
     VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'}
 
-    # Modern codec standards
-    MODERN_CODECS = {'hevc', 'h265', 'av1', 'vp9'}
-    ACCEPTABLE_CODECS = {'h264', 'hevc', 'h265', 'av1', 'vp9'}
+    # Modern codec standards - includes all variations and tags
+    MODERN_CODECS = {'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
+    ACCEPTABLE_CODECS = {'h264', 'avc', 'avc1', 'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -117,6 +117,17 @@ class VideoAnalyzer:
 
             # Extract video information
             codec = video_stream.get('codec_name', 'unknown')
+
+            # Also check codec_tag_string for variations (e.g., hvc1, hev1 for HEVC)
+            codec_tag = video_stream.get('codec_tag_string', '').lower().strip('[]')
+            if self.verbose and codec_tag:
+                print(f"  Detected codec: {codec}, tag: {codec_tag}")
+
+            # Use codec tag if it provides more specific info (e.g., hvc1 instead of hevc)
+            # But only if it's a recognized codec variant
+            if codec_tag and codec_tag in self.MODERN_CODECS | self.ACCEPTABLE_CODECS:
+                codec = codec_tag
+
             width = int(video_stream.get('width', 0))
             height = int(video_stream.get('height', 0))
 
@@ -204,8 +215,8 @@ class VideoAnalyzer:
         if codec_lower not in self.MODERN_CODECS:
             return False
 
-        # Check container
-        if video_info.container not in {'mp4', 'mkv', 'matroska', 'webm'}:
+        # Check container (mov and mp4 are essentially the same - both MPEG-4 Part 14)
+        if video_info.container not in {'mp4', 'mov', 'mkv', 'matroska', 'webm'}:
             return False
 
         # Video should have valid dimensions

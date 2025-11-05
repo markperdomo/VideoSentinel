@@ -21,6 +21,35 @@ from issue_detector import IssueDetector
 from encoder import VideoEncoder
 
 
+# ANSI color codes for terminal output
+class Colors:
+    """ANSI color codes for terminal output"""
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+
+    @staticmethod
+    def green(text):
+        return f"{Colors.GREEN}{text}{Colors.RESET}"
+
+    @staticmethod
+    def red(text):
+        return f"{Colors.RED}{text}{Colors.RESET}"
+
+    @staticmethod
+    def yellow(text):
+        return f"{Colors.YELLOW}{text}{Colors.RESET}"
+
+    @staticmethod
+    def bold(text):
+        return f"{Colors.BOLD}{text}{Colors.RESET}"
+
+
 def main():
     """Main entry point for VideoSentinel CLI"""
     parser = argparse.ArgumentParser(
@@ -164,24 +193,23 @@ def main():
             video_info = analyzer.get_video_info(video_path)
 
             if not video_info or not video_info.is_valid:
-                tqdm.write(f"✗ {video_path.name}: Unable to analyze")
+                tqdm.write(Colors.yellow(f"✗ {video_path.name}: Unable to analyze"))
                 continue
 
             is_compliant = analyzer.meets_modern_specs(video_info)
 
             if is_compliant:
                 compliant_videos.append(video_path)
-                if args.verbose:
-                    tqdm.write(f"✓ {video_path.name}: Meets specs ({video_info.codec}, {video_info.width}x{video_info.height})")
+                tqdm.write(Colors.green(f"✓ {video_path.name}: Meets specs ({video_info.codec.upper()}, {video_info.width}x{video_info.height})"))
             else:
                 non_compliant_videos.append((video_path, video_info))
-                tqdm.write(f"✗ {video_path.name}")
-                tqdm.write(f"    Codec: {video_info.codec} (should be H.265/HEVC or better)")
+                tqdm.write(Colors.red(f"✗ {video_path.name}"))
+                tqdm.write(f"    Codec: {Colors.red(video_info.codec.upper())} (should be {Colors.green('H.265/HEVC')}, {Colors.green('AV1')}, or {Colors.green('VP9')})")
                 tqdm.write(f"    Resolution: {video_info.width}x{video_info.height}")
                 tqdm.write(f"    Container: {video_info.container}")
 
         print()
-        print(f"Summary: {len(compliant_videos)} compliant, {len(non_compliant_videos)} non-compliant")
+        print(f"Summary: {Colors.green(f'{len(compliant_videos)} compliant')}, {Colors.red(f'{len(non_compliant_videos)} non-compliant')}")
         print()
 
         # Re-encode if requested
