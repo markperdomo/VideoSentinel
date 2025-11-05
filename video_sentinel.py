@@ -186,8 +186,7 @@ def main():
                 videos_to_encode,
                 output_dir=args.output_dir,
                 target_codec=args.target_codec,
-                video_infos=video_infos_dict,
-                verbose=args.verbose
+                video_infos=video_infos_dict
             )
 
     # Find duplicates
