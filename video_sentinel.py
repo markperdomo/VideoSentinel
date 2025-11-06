@@ -189,7 +189,8 @@ def main():
     parser.add_argument(
         'directory',
         type=Path,
-        help='Directory containing video files to analyze'
+        nargs='?',
+        help='Directory containing video files to analyze (not required for --clear-queue)'
     )
 
     parser.add_argument(
@@ -292,9 +293,52 @@ def main():
         help='Number of files to buffer locally in queue mode (default: 4)'
     )
 
+    parser.add_argument(
+        '--clear-queue',
+        action='store_true',
+        help='Clear queue state and temp files from previous queue mode session'
+    )
+
     args = parser.parse_args()
 
-    # Validate input directory
+    # Handle --clear-queue flag (can be used standalone)
+    if args.clear_queue:
+        print("="*80)
+        print("CLEARING QUEUE STATE")
+        print("="*80)
+
+        queue_manager = NetworkQueueManager(
+            temp_dir=args.temp_dir,
+            verbose=args.verbose
+        )
+
+        temp_dir = queue_manager.temp_dir
+        state_file = queue_manager.state_file
+
+        if state_file.exists():
+            print(f"Removing state file: {state_file}")
+            state_file.unlink()
+        else:
+            print(f"No state file found at: {state_file}")
+
+        # Count and remove temp files
+        temp_files = list(temp_dir.glob("*"))
+        if temp_files:
+            total_size = sum(f.stat().st_size for f in temp_files if f.is_file())
+            print(f"Removing {len(temp_files)} temp files ({total_size / (1024**2):.2f} MB)")
+            queue_manager.cleanup()
+            print(f"{Colors.green('✓')} Queue cleared successfully")
+        else:
+            print("No temp files found")
+
+        print("="*80)
+        sys.exit(0)
+
+    # Validate input directory (required unless using --clear-queue)
+    if not args.directory:
+        print(f"Error: Directory argument is required", file=sys.stderr)
+        sys.exit(1)
+
     if not args.directory.exists():
         print(f"Error: Directory '{args.directory}' does not exist", file=sys.stderr)
         sys.exit(1)
@@ -490,7 +534,7 @@ def main():
                         return success
 
                     try:
-                        # Start the queue (blocks until complete)
+                        # Start the queue (blocks until complete, including final uploads)
                         print("Starting queue pipeline...")
                         print()
                         queue_manager.start(encode_callback)

@@ -156,6 +156,20 @@ class NetworkQueueManager:
         # Main thread handles encoding (CPU-bound, no benefit to threading)
         self._encode_worker()
 
+        # Wait for all uploads to complete before exiting
+        if self.verbose:
+            self.logger.info("Encoding complete, waiting for uploads to finish...")
+
+        # Wait for upload queue to drain
+        self.upload_queue.join()
+
+        # Give upload thread time to finish processing the last file
+        if self.upload_thread.is_alive():
+            self.upload_thread.join(timeout=30)
+
+        if self.verbose:
+            self.logger.info("All uploads complete")
+
     def stop(self) -> None:
         """Stop all workers gracefully"""
         self.stop_event.set()
@@ -323,8 +337,8 @@ class NetworkQueueManager:
                     output = Path(queued_file.output_path)
                     final = Path(queued_file.final_path)
 
-                    if self.verbose:
-                        self.logger.info(f"Uploading: {output.name} -> {final.name}")
+                    # Show upload progress (not just in verbose mode)
+                    print(f"Uploading: {output.name} -> {final.name}")
 
                     # Copy encoded file to network destination
                     final.parent.mkdir(parents=True, exist_ok=True)
@@ -352,8 +366,8 @@ class NetworkQueueManager:
                     # Mark complete
                     self._update_file_state(queued_file, FileState.COMPLETE)
 
-                    if self.verbose:
-                        self.logger.info(f"Completed: {final.name}")
+                    # Show completion (not just in verbose mode)
+                    print(f"✓ Uploaded: {final.name}")
 
                 except Exception as e:
                     error_msg = f"Upload failed: {str(e)}"
