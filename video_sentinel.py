@@ -19,6 +19,7 @@ from video_analyzer import VideoAnalyzer, VideoInfo
 from duplicate_detector import DuplicateDetector
 from issue_detector import IssueDetector
 from encoder import VideoEncoder
+from network_queue_manager import NetworkQueueManager
 
 
 # ANSI color codes for terminal output
@@ -50,6 +51,134 @@ class Colors:
         return f"{Colors.BOLD}{text}{Colors.RESET}"
 
 
+def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
+    """
+    Rank video quality for duplicate selection
+    Higher score = better quality
+
+    Considers: codec modernity, resolution, bitrate
+    """
+    score = 0
+
+    # Codec scoring (modern codecs are better)
+    codec_scores = {
+        'av1': 1000,
+        'vp9': 900,
+        'hevc': 800,
+        'h265': 800,
+        'h264': 400,
+        'mpeg4': 200,
+        'mpeg2': 100,
+        'wmv': 50,
+        'xvid': 50,
+    }
+    score += codec_scores.get(video_info.codec.lower(), 0)
+
+    # Resolution scoring (pixels)
+    score += video_info.width * video_info.height // 1000
+
+    # Bitrate scoring (higher bitrate usually means better quality)
+    score += video_info.bitrate // 10000
+
+    return score
+
+
+def handle_duplicate_group(
+    group_name: str,
+    videos: List[Path],
+    analyzer: VideoAnalyzer,
+    action: str,
+    verbose: bool = False
+) -> List[Path]:
+    """
+    Handle a duplicate group based on action
+
+    Args:
+        group_name: Name of the duplicate group
+        videos: List of duplicate video paths
+        analyzer: VideoAnalyzer instance
+        action: 'report', 'interactive', or 'auto-best'
+        verbose: Enable verbose output
+
+    Returns:
+        List of videos to delete
+    """
+    to_delete = []
+
+    if action == 'report':
+        # Just report, no action
+        return to_delete
+
+    # Get video info for all duplicates
+    video_infos = {}
+    for video in videos:
+        info = analyzer.get_video_info(video)
+        if info:
+            video_infos[video] = info
+
+    if not video_infos:
+        print(f"  {Colors.yellow('Warning: Could not analyze videos in this group')}")
+        return to_delete
+
+    # Rank videos by quality
+    ranked_videos = sorted(
+        video_infos.keys(),
+        key=lambda v: rank_video_quality(v, video_infos[v]),
+        reverse=True
+    )
+
+    if action == 'auto-best':
+        # Keep the best, mark others for deletion
+        best_video = ranked_videos[0]
+        to_delete = [v for v in ranked_videos if v != best_video]
+
+        print(f"  {Colors.green('✓ Keeping:')} {best_video.name}")
+        info = video_infos[best_video]
+        print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps)")
+
+        for video in to_delete:
+            info = video_infos[video]
+            file_size_mb = video.stat().st_size / (1024 * 1024)
+            print(f"  {Colors.red('✗ Deleting:')} {video.name} ({file_size_mb:.2f} MB)")
+            print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps)")
+
+    elif action == 'interactive':
+        # Show options and let user choose
+        print(f"\n{Colors.bold(group_name)} - {len(videos)} duplicates found:")
+        print()
+
+        for idx, video in enumerate(ranked_videos, 1):
+            info = video_infos[video]
+            file_size_mb = video.stat().st_size / (1024 * 1024)
+            quality_rank = "★ BEST" if idx == 1 else f"  #{idx}"
+
+            print(f"  {quality_rank} [{idx}] {video.name}")
+            print(f"      Codec: {info.codec.upper()}, Resolution: {info.width}x{info.height}")
+            print(f"      Bitrate: {info.bitrate//1000} kbps, Size: {file_size_mb:.2f} MB")
+            print()
+
+        print(f"Options:")
+        print(f"  1-{len(ranked_videos)}: Keep that video, delete others")
+        print(f"  0 or Enter: Keep all (no action)")
+        print()
+
+        choice = input(f"Your choice: ").strip()
+
+        if choice.isdigit() and 1 <= int(choice) <= len(ranked_videos):
+            keep_idx = int(choice) - 1
+            keep_video = ranked_videos[keep_idx]
+            to_delete = [v for v in ranked_videos if v != keep_video]
+
+            print(f"\n  {Colors.green('✓ Keeping:')} {keep_video.name}")
+            for video in to_delete:
+                file_size_mb = video.stat().st_size / (1024 * 1024)
+                print(f"  {Colors.red('✗ Will delete:')} {video.name} ({file_size_mb:.2f} MB)")
+        else:
+            print(f"  {Colors.yellow('→ No action, keeping all')}")
+
+    return to_delete
+
+
 def main():
     """Main entry point for VideoSentinel CLI"""
     parser = argparse.ArgumentParser(
@@ -79,6 +208,13 @@ def main():
         '--find-duplicates',
         action='store_true',
         help='Find duplicate videos using perceptual hashing'
+    )
+
+    parser.add_argument(
+        '--duplicate-action',
+        choices=['report', 'interactive', 'auto-best'],
+        default='report',
+        help='Action for duplicate groups: report (default, no action), interactive (ask for each group), auto-best (keep best quality, delete others)'
     )
 
     parser.add_argument(
@@ -130,6 +266,32 @@ def main():
         help='Enable verbose output'
     )
 
+    parser.add_argument(
+        '--queue-mode',
+        action='store_true',
+        help='Enable queue mode for network storage (downloads files locally, encodes, then uploads)'
+    )
+
+    parser.add_argument(
+        '--temp-dir',
+        type=Path,
+        help='Temporary directory for queue mode (default: system temp)'
+    )
+
+    parser.add_argument(
+        '--max-temp-size',
+        type=float,
+        default=50.0,
+        help='Maximum temp storage size in GB for queue mode (default: 50)'
+    )
+
+    parser.add_argument(
+        '--buffer-size',
+        type=int,
+        default=4,
+        help='Number of files to buffer locally in queue mode (default: 4)'
+    )
+
     args = parser.parse_args()
 
     # Validate input directory
@@ -141,8 +303,12 @@ def main():
         print(f"Error: '{args.directory}' is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    # If no action specified, show all checks by default
-    if not any([args.check_specs, args.find_duplicates, args.check_issues]):
+    # If re-encode is specified, automatically enable check-specs (required for re-encoding)
+    if args.re_encode and not args.check_specs:
+        args.check_specs = True
+
+    # If no action specified at all, show all checks by default
+    if not any([args.check_specs, args.find_duplicates, args.check_issues, args.re_encode]):
         args.check_specs = True
         args.find_duplicates = True
         args.check_issues = True
@@ -254,18 +420,123 @@ def main():
                 videos_to_encode = [v[0] for v in videos_to_encode_tuples]
                 video_infos_dict = {v[0]: v[1] for v in videos_to_encode_tuples}
 
-                encoder.batch_re_encode(
-                    videos_to_encode,
-                    output_dir=args.output_dir,
-                    target_codec=args.target_codec,
-                    video_infos=video_infos_dict,
-                    replace_original=args.replace_original
-                )
+                # Use queue mode if enabled
+                if args.queue_mode:
+                    print()
+                    print("="*80)
+                    print("QUEUE MODE ENABLED")
+                    print("="*80)
+                    print(f"Temp directory: {args.temp_dir or 'system temp'}")
+                    print(f"Buffer size: {args.buffer_size} files")
+                    print(f"Max temp storage: {args.max_temp_size} GB")
+                    print()
+                    print("Pipeline stages:")
+                    print("  1. DOWNLOAD: Network → Local temp storage")
+                    print("  2. ENCODE: Local encoding (fast!)")
+                    print("  3. UPLOAD: Local → Network")
+                    print("="*80)
+                    print()
+
+                    # Initialize queue manager
+                    queue_manager = NetworkQueueManager(
+                        temp_dir=args.temp_dir,
+                        max_buffer_size=args.buffer_size,
+                        max_temp_size_gb=args.max_temp_size,
+                        verbose=args.verbose,
+                        replace_original=args.replace_original
+                    )
+
+                    # Try to resume from previous state
+                    if queue_manager.load_state():
+                        print("Resumed from previous session")
+                        print()
+
+                    # Add files to queue
+                    queue_manager.add_files(videos_to_encode)
+
+                    # Create encoding callback
+                    current_idx = [0]  # Use list to allow modification in nested function
+                    total = len(videos_to_encode)
+
+                    def encode_callback(local_input: Path, local_output: Path) -> bool:
+                        """Callback for encoding a single video in queue mode"""
+                        current_idx[0] += 1
+
+                        # Find the original network path for this file
+                        # (local_input is a temp file, need to find which video it corresponds to)
+                        video_info = None
+
+                        # Try to find matching video_info by filename
+                        for orig_path, info in video_infos_dict.items():
+                            if orig_path.name == local_input.name or local_input.name.startswith('download_'):
+                                # Check if the downloaded file matches
+                                check_name = local_input.name.replace('download_', '')
+                                if orig_path.name == check_name:
+                                    video_info = info
+                                    break
+
+                        # Encode the video
+                        success = encoder.re_encode_video(
+                            local_input,
+                            local_output,
+                            target_codec=args.target_codec,
+                            video_info=video_info,
+                            current_index=current_idx[0],
+                            total_count=total,
+                            keep_original=True,  # Queue manager handles cleanup
+                            replace_original=False  # Queue manager handles replacement
+                        )
+
+                        return success
+
+                    try:
+                        # Start the queue (blocks until complete)
+                        print("Starting queue pipeline...")
+                        print()
+                        queue_manager.start(encode_callback)
+
+                        # Show final progress
+                        progress = queue_manager.get_progress()
+                        print()
+                        print("="*80)
+                        print("QUEUE MODE COMPLETE")
+                        print("="*80)
+                        print(f"Total: {progress['total']}")
+                        print(f"Completed: {Colors.green(str(progress['complete']))}")
+                        print(f"Failed: {Colors.red(str(progress['failed']))}")
+                        print("="*80)
+                        print()
+
+                        # Cleanup temp directory
+                        queue_manager.cleanup()
+
+                    except KeyboardInterrupt:
+                        print()
+                        print("="*80)
+                        print("INTERRUPTED - Saving state...")
+                        print("="*80)
+                        queue_manager.stop()
+                        print()
+                        print("Progress saved. Run the same command again to resume.")
+                        print()
+                        sys.exit(0)
+
+                else:
+                    # Standard batch encoding (no queue)
+                    encoder.batch_re_encode(
+                        videos_to_encode,
+                        output_dir=args.output_dir,
+                        target_codec=args.target_codec,
+                        video_infos=video_infos_dict,
+                        replace_original=args.replace_original
+                    )
 
     # Find duplicates
     if args.find_duplicates:
         print("="*80)
         print("DUPLICATE VIDEO DETECTION")
+        if args.duplicate_action != 'report':
+            print(f"(Action: {args.duplicate_action})")
         print("="*80)
 
         duplicate_groups = duplicate_detector.find_duplicates(video_files)
@@ -273,12 +544,80 @@ def main():
         if duplicate_groups:
             print(f"\nFound {len(duplicate_groups)} groups of duplicate videos:\n")
 
-            for group_name, videos in duplicate_groups.items():
-                print(f"{group_name} ({len(videos)} videos):")
-                for video in videos:
-                    file_size_mb = video.stat().st_size / (1024 * 1024)
-                    print(f"  - {video.name} ({file_size_mb:.2f} MB)")
-                print()
+            all_to_delete = []
+
+            if args.duplicate_action == 'report':
+                # Just report duplicates, no action
+                for group_name, videos in duplicate_groups.items():
+                    print(f"{group_name} ({len(videos)} videos):")
+                    for video in videos:
+                        file_size_mb = video.stat().st_size / (1024 * 1024)
+                        print(f"  - {video.name} ({file_size_mb:.2f} MB)")
+                    print()
+            else:
+                # Handle each group with auto-best or interactive
+                for group_name, videos in duplicate_groups.items():
+                    print(f"\n{group_name}:")
+                    to_delete = handle_duplicate_group(
+                        group_name,
+                        videos,
+                        analyzer,
+                        args.duplicate_action,
+                        args.verbose
+                    )
+                    all_to_delete.extend(to_delete)
+                    print()
+
+                # Perform deletions if any
+                if all_to_delete:
+                    print()
+                    print("="*80)
+                    print(f"DELETING {len(all_to_delete)} DUPLICATE FILES")
+                    print("="*80)
+
+                    if args.duplicate_action == 'auto-best':
+                        # Auto mode - delete immediately
+                        confirm = input(f"\nDelete {len(all_to_delete)} files? (yes/no): ").strip().lower()
+                        if confirm == 'yes':
+                            deleted_count = 0
+                            total_size_freed = 0
+
+                            for video in all_to_delete:
+                                try:
+                                    size = video.stat().st_size
+                                    video.unlink()
+                                    deleted_count += 1
+                                    total_size_freed += size
+                                    print(f"  {Colors.green('✓')} Deleted: {video.name}")
+                                except Exception as e:
+                                    print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
+
+                            print()
+                            print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
+                            print(f"Space freed: {total_size_freed / (1024*1024):.2f} MB")
+                        else:
+                            print(f"{Colors.yellow('→ Deletion cancelled')}")
+                    else:
+                        # Interactive mode - already got confirmation per group, delete now
+                        deleted_count = 0
+                        total_size_freed = 0
+
+                        for video in all_to_delete:
+                            try:
+                                size = video.stat().st_size
+                                video.unlink()
+                                deleted_count += 1
+                                total_size_freed += size
+                                print(f"  {Colors.green('✓')} Deleted: {video.name}")
+                            except Exception as e:
+                                print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
+
+                        print()
+                        print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
+                        print(f"Space freed: {total_size_freed / (1024*1024):.2f} MB")
+                    print()
+                else:
+                    print(f"\n{Colors.yellow('No duplicates marked for deletion')}")
 
             print(f"Total duplicates: {sum(len(v) for v in duplicate_groups.values())} videos in {len(duplicate_groups)} groups")
         else:
