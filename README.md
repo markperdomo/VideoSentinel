@@ -7,6 +7,7 @@ A Python command-line utility for managing and validating video libraries. Ensur
 - **Encoding Validation**: Check if videos meet modern encoding standards (H.265/HEVC by default)
 - **Advanced Duplicate Detection**: Find duplicate videos using multi-frame perceptual hashing (detects similar content even with different encoding, resolution, or quality)
 - **Intelligent Duplicate Management**: Automatically keep best quality or interactively choose which duplicates to delete
+- **QuickLook Compatibility Fixer**: Automatically fix macOS QuickLook issues - fast remux MKV→MP4, fix HEVC tags, ensure proper pixel format
 - **Network Queue Mode**: Optimized pipeline for encoding files stored on network drives - downloads to local temp storage, encodes fast, then uploads back
 - **Issue Detection**: Identify corrupted files, incomplete videos, and encoding problems
 - **Smart Re-encoding**: Automatically re-encode videos to modern specifications with intelligent quality matching based on source bitrate
@@ -25,6 +26,7 @@ A Python command-line utility for managing and validating video libraries. Ensur
   - [Basic Usage](#basic-usage)
   - [Specific Operations](#specific-operations)
   - [Re-encoding](#re-encoding)
+  - [Fixing QuickLook Compatibility](#fixing-quicklook-compatibility)
   - [Network Queue Mode](#network-queue-mode)
   - [Additional Options](#additional-options)
 - [Examples](#examples)
@@ -122,6 +124,79 @@ Choose target codec:
 python video_sentinel.py /path/to/videos --re-encode --target-codec hevc
 ```
 
+### Fixing QuickLook Compatibility
+
+If you have videos that are already properly encoded (HEVC/H.264) but don't preview in macOS Finder/QuickLook, use `--fix-quicklook` to automatically fix compatibility issues.
+
+**Common QuickLook issues:**
+- Videos in MKV containers (need MP4 for QuickLook)
+- HEVC videos with wrong tag (hev1 instead of hvc1)
+- Wrong pixel format (needs yuv420p)
+- Missing faststart flag (metadata at end of file)
+
+**Two-tier fixing approach:**
+
+**1. Fast remux (no re-encoding)** - Takes seconds:
+- Converts MKV → MP4 container
+- Fixes HEVC tag to hvc1
+- Adds faststart flag
+
+**2. Full re-encode** - Only when necessary:
+- Wrong pixel format
+- Other codec-level issues
+
+**Check QuickLook compatibility:**
+```bash
+python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
+```
+
+**Fix and replace originals:**
+```bash
+python video_sentinel.py /path/to/videos --check-specs --fix-quicklook --replace-original
+```
+
+**With network queue mode:**
+```bash
+python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --queue-mode --replace-original
+```
+
+**Example output:**
+```
+QUICKLOOK COMPATIBILITY CHECK
+================================================================================
+
+✓ video1.mp4: QuickLook compatible
+⚠ video2.mkv: Needs remux (fast)
+    - Container is matroska, should be MP4
+✗ video3.mp4: Needs re-encode
+    - HEVC tag is hev1, should be hvc1 for QuickLook
+    - Pixel format is yuv422p, should be yuv420p
+
+Summary: 1 compatible, 1 need remux, 1 need re-encode
+
+REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)
+================================================================================
+
+Remuxing: video2.mkv
+✓ Remuxed: video2.mkv
+✓ Replaced: video2.mkv → video2.mp4
+
+RE-ENCODING FOR QUICKLOOK COMPATIBILITY
+================================================================================
+
+Re-encoding: video3.mp4
+✓ Completed: video3.mp4
+✓ Replaced: video3.mp4
+```
+
+**Benefits:**
+- ✅ **Fast**: Remuxing MKV→MP4 takes seconds (no re-encoding!)
+- ✅ **Smart**: Only re-encodes when absolutely necessary
+- ✅ **Safe**: Works with `--replace-original` flag
+- ✅ **Compatible**: Works with queue mode for network storage
+
+**Note:** Only processes videos that already meet modern codec specs. Use `--re-encode` for videos with old codecs.
+
 ### Network Queue Mode
 
 When encoding videos stored on network drives (NAS, SMB shares, network volumes), encoding can be extremely slow due to network I/O during frame reading. **Queue mode** solves this by implementing a three-stage pipeline:
@@ -185,10 +260,13 @@ Speed improvement: 2-3x faster!
 - `--file-types`: Filter re-encoding to specific file types (comma-separated, e.g., "wmv,avi,mov")
 - `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
 - `--deep-scan`: Perform deep integrity check by decoding entire videos (slower but more thorough)
+- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
+- `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
 - `--queue-mode`: Enable network queue mode (see [Network Queue Mode](#network-queue-mode))
 - `--temp-dir PATH`: Temporary directory for queue mode (default: system temp)
 - `--max-temp-size GB`: Maximum temp storage size in GB for queue mode (default: 50)
 - `--buffer-size N`: Number of files to buffer locally in queue mode (default: 4)
+- `--clear-queue`: Clear queue state and temp files from previous queue mode session
 
 ## Examples
 

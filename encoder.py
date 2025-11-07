@@ -699,3 +699,81 @@ class VideoEncoder:
         estimated_size = int(video_info.file_size * ratio * crf_factor)
 
         return estimated_size
+
+    def remux_to_mp4(
+        self,
+        input_path: Path,
+        output_path: Path,
+        fix_hevc_tag: bool = True
+    ) -> bool:
+        """
+        Remux video to MP4 container without re-encoding (fast!)
+
+        This is useful for:
+        - Converting MKV to MP4 for QuickLook compatibility
+        - Fixing HEVC tag from hev1 to hvc1 for Apple devices
+        - Adding faststart flag for instant preview
+
+        Args:
+            input_path: Path to input video file
+            output_path: Path for output MP4 file
+            fix_hevc_tag: If True, converts HEVC hev1 tag to hvc1 for QuickLook
+
+        Returns:
+            True if remux successful, False otherwise
+        """
+        if not input_path.exists():
+            print(f"Error: Input file does not exist: {input_path}")
+            return False
+
+        try:
+            # Build ffmpeg command for remuxing (no re-encoding)
+            cmd = [
+                'ffmpeg',
+                '-i', str(input_path),
+                '-c', 'copy',  # Copy streams without re-encoding
+                '-movflags', 'faststart',  # Move moov atom to beginning for fast preview
+                '-y',  # Overwrite output file if exists
+            ]
+
+            # For HEVC videos, fix the tag for Apple compatibility
+            if fix_hevc_tag:
+                cmd.extend(['-tag:v', 'hvc1'])
+
+            cmd.append(str(output_path))
+
+            if self.verbose:
+                tqdm.write(f"Remuxing: {input_path.name} -> {output_path.name}")
+
+            # Run ffmpeg
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode != 0:
+                if self.verbose:
+                    tqdm.write(f"Remux failed for {input_path.name}: {result.stderr}")
+                return False
+
+            # Validate output
+            if not output_path.exists() or output_path.stat().st_size < 1024:
+                if self.verbose:
+                    tqdm.write(f"Remux output validation failed for {input_path.name}")
+                if output_path.exists():
+                    output_path.unlink()
+                return False
+
+            if self.verbose:
+                tqdm.write(f"✓ Remuxed: {input_path.name}")
+
+            return True
+
+        except subprocess.TimeoutExpired:
+            print(f"Error: Remux timeout for {input_path.name}")
+            return False
+        except Exception as e:
+            print(f"Error remuxing {input_path.name}: {e}")
+            return False

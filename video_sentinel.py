@@ -212,6 +212,12 @@ def main():
     )
 
     parser.add_argument(
+        '--fix-quicklook',
+        action='store_true',
+        help='Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)'
+    )
+
+    parser.add_argument(
         '--duplicate-action',
         choices=['report', 'interactive', 'auto-best'],
         default='report',
@@ -351,8 +357,12 @@ def main():
     if args.re_encode and not args.check_specs:
         args.check_specs = True
 
+    # If fix-quicklook is specified, automatically enable check-specs
+    if args.fix_quicklook and not args.check_specs:
+        args.check_specs = True
+
     # If no action specified at all, show all checks by default
-    if not any([args.check_specs, args.find_duplicates, args.check_issues, args.re_encode]):
+    if not any([args.check_specs, args.find_duplicates, args.check_issues, args.re_encode, args.fix_quicklook]):
         args.check_specs = True
         args.find_duplicates = True
         args.check_issues = True
@@ -574,6 +584,99 @@ def main():
                         video_infos=video_infos_dict,
                         replace_original=args.replace_original
                     )
+
+        # Fix QuickLook compatibility if requested
+        if args.fix_quicklook and compliant_videos:
+            print("="*80)
+            print("QUICKLOOK COMPATIBILITY CHECK")
+            print("="*80)
+            print()
+
+            videos_to_remux = []
+            videos_to_reencode = []
+
+            for video_path in tqdm(compliant_videos, desc="Checking QuickLook compatibility", unit="video"):
+                compat = analyzer.check_quicklook_compatibility(video_path)
+
+                if compat['compatible']:
+                    tqdm.write(Colors.green(f"✓ {video_path.name}: QuickLook compatible"))
+                elif compat['needs_remux']:
+                    tqdm.write(Colors.yellow(f"⚠ {video_path.name}: Needs remux (fast)"))
+                    for issue in compat['issues']:
+                        tqdm.write(f"    - {issue}")
+                    videos_to_remux.append(video_path)
+                elif compat['needs_reencode']:
+                    tqdm.write(Colors.red(f"✗ {video_path.name}: Needs re-encode"))
+                    for issue in compat['issues']:
+                        tqdm.write(f"    - {issue}")
+                    videos_to_reencode.append(video_path)
+
+            print()
+            print(f"Summary: {Colors.green(f'{len(compliant_videos) - len(videos_to_remux) - len(videos_to_reencode)} compatible')}, "
+                  f"{Colors.yellow(f'{len(videos_to_remux)} need remux')}, "
+                  f"{Colors.red(f'{len(videos_to_reencode)} need re-encode')}")
+            print()
+
+            # Remux videos (fast - just container change)
+            if videos_to_remux:
+                print("="*80)
+                print("REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)")
+                print("="*80)
+                print()
+
+                for video_path in videos_to_remux:
+                    output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+
+                    print(f"Remuxing: {video_path.name}")
+                    success = encoder.remux_to_mp4(video_path, output_path)
+
+                    if success:
+                        if args.replace_original:
+                            # Delete original and rename output
+                            video_path.unlink()
+                            output_path.rename(video_path.with_suffix('.mp4'))
+                            print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                        else:
+                            print(f"✓ Created: {output_path.name}")
+                    else:
+                        print(f"✗ Failed: {video_path.name}")
+
+                print()
+
+            # Re-encode videos (slower - needs full re-encode)
+            if videos_to_reencode:
+                print("="*80)
+                print("RE-ENCODING FOR QUICKLOOK COMPATIBILITY")
+                print("="*80)
+                print()
+
+                for video_path in videos_to_reencode:
+                    video_info = analyzer.get_video_info(video_path)
+                    output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+
+                    print(f"Re-encoding: {video_path.name}")
+                    success = encoder.re_encode_video(
+                        video_path,
+                        output_path,
+                        target_codec=args.target_codec,
+                        video_info=video_info,
+                        keep_original=not args.replace_original
+                    )
+
+                    if success:
+                        if args.replace_original:
+                            # Delete original and rename output
+                            if video_path.exists() and video_path != output_path:
+                                video_path.unlink()
+                            if output_path != video_path.with_suffix('.mp4'):
+                                output_path.rename(video_path.with_suffix('.mp4'))
+                            print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                        else:
+                            print(f"✓ Created: {output_path.name}")
+                    else:
+                        print(f"✗ Failed: {video_path.name}")
+
+                print()
 
     # Find duplicates
     if args.find_duplicates:

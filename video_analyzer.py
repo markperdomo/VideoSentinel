@@ -197,6 +197,91 @@ class VideoAnalyzer:
                 error_message=str(e)
             )
 
+    def check_quicklook_compatibility(self, file_path: Path) -> Dict[str, any]:
+        """
+        Check if video is compatible with macOS QuickLook
+
+        Args:
+            file_path: Path to video file
+
+        Returns:
+            Dict with compatibility info: {
+                'compatible': bool,
+                'issues': List[str],
+                'needs_remux': bool,  # Just needs container change
+                'needs_reencode': bool  # Needs full re-encode
+            }
+        """
+        issues = []
+        needs_remux = False
+        needs_reencode = False
+
+        try:
+            # Get detailed stream info
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format',
+                '-show_streams',
+                str(file_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                return {'compatible': False, 'issues': ['Cannot analyze file'], 'needs_remux': False, 'needs_reencode': False}
+
+            data = json.loads(result.stdout)
+            format_info = data.get('format', {})
+
+            # Find video stream
+            video_stream = None
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'video':
+                    video_stream = stream
+                    break
+
+            if not video_stream:
+                return {'compatible': False, 'issues': ['No video stream'], 'needs_remux': False, 'needs_reencode': False}
+
+            # Check 1: Container should be MP4
+            container = format_info.get('format_name', '').lower()
+            if 'mp4' not in container and 'mov' not in container:
+                issues.append(f"Container is {container}, should be MP4")
+                needs_remux = True
+
+            # Check 2: For HEVC, check codec tag (should be hvc1, not hev1)
+            codec_name = video_stream.get('codec_name', '').lower()
+            codec_tag = video_stream.get('codec_tag_string', '').lower()
+
+            if codec_name in ['hevc', 'h265']:
+                if codec_tag != 'hvc1':
+                    issues.append(f"HEVC tag is {codec_tag}, should be hvc1 for QuickLook")
+                    needs_reencode = True
+
+            # Check 3: Pixel format should be yuv420p
+            pix_fmt = video_stream.get('pix_fmt', '').lower()
+            if pix_fmt and pix_fmt != 'yuv420p':
+                issues.append(f"Pixel format is {pix_fmt}, should be yuv420p")
+                needs_reencode = True
+
+            # Check 4: Faststart flag (check if moov atom is at the beginning)
+            # This is harder to check programmatically, but we can infer from format tags
+            format_tags = format_info.get('tags', {})
+            # Note: ffprobe doesn't directly show faststart, but we can recommend it
+
+            compatible = len(issues) == 0
+
+            return {
+                'compatible': compatible,
+                'issues': issues,
+                'needs_remux': needs_remux and not needs_reencode,  # Only remux if no re-encode needed
+                'needs_reencode': needs_reencode
+            }
+
+        except Exception as e:
+            return {'compatible': False, 'issues': [f"Error: {str(e)}"], 'needs_remux': False, 'needs_reencode': False}
+
     def meets_modern_specs(self, video_info: VideoInfo) -> bool:
         """
         Check if video meets modern encoding specifications

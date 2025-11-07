@@ -52,12 +52,21 @@ python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action au
 # Find duplicates and interactively choose what to keep
 python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action interactive
 
+# Fix QuickLook compatibility (fast remux MKV→MP4, fix HEVC tags)
+python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
+
+# Fix QuickLook compatibility and replace originals
+python video_sentinel.py /path/to/videos --check-specs --fix-quicklook --replace-original
+
 # Network queue mode (for network storage - downloads local, encodes fast, uploads back)
 python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode
 
 # Network queue mode with custom temp dir and settings
 python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode \
   --temp-dir /Users/you/temp --buffer-size 3 --max-temp-size 100
+
+# Clear queue state and temp files
+python video_sentinel.py --clear-queue
 ```
 
 ### Testing Individual Modules
@@ -229,10 +238,12 @@ Supported: .mp4, .mkv, .avi, .mov, .wmv, .flv, .webm, .m4v, .mpg, .mpeg
 - Files are only deleted after successful encoding and validation
 
 **CLI Flags for New Features**
+- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
 - `--temp-dir PATH`: Temp directory for queue mode (default: system temp)
 - `--buffer-size N`: Number of files to buffer in queue mode (default: 4)
 - `--max-temp-size GB`: Max temp storage size in GB (default: 50)
+- `--clear-queue`: Clear queue state and temp files from previous queue mode session
 - `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
 
 ## Usage Tips
@@ -361,6 +372,50 @@ python video_sentinel.py ~/Videos --find-duplicates --duplicate-action interacti
 - Ranking logic: `video_sentinel.py:54-83`
 - Handler function: `video_sentinel.py:86-179`
 - Integration: `video_sentinel.py:530-622`
+
+### Fixing QuickLook Compatibility
+
+VideoSentinel can automatically fix macOS QuickLook/Finder preview issues for videos that are already properly encoded (HEVC/H.264) but won't preview.
+
+**Common QuickLook issues:**
+1. **Wrong container**: MKV instead of MP4 (QuickLook requires MP4)
+2. **Wrong HEVC tag**: hev1 instead of hvc1 (Apple devices need hvc1)
+3. **Wrong pixel format**: yuv422p instead of yuv420p (compatibility issue)
+4. **Missing faststart**: Metadata at end of file (prevents instant preview)
+
+**Two-tier fixing approach:**
+
+**1. Fast remux (no re-encoding)** - Takes seconds, not minutes:
+- Changes container from MKV to MP4 using `ffmpeg -c copy`
+- Fixes HEVC tag with `-tag:v hvc1`
+- Adds `-movflags faststart` for instant preview
+- No quality loss (just container change)
+
+**2. Full re-encode** - Only when necessary:
+- Wrong pixel format requires re-encoding with `-pix_fmt yuv420p`
+- Uses same smart quality matching as regular re-encoding
+
+**Usage:**
+```bash
+# Check what needs fixing
+python video_sentinel.py /Videos --check-specs --fix-quicklook
+
+# Fix and replace originals
+python video_sentinel.py /Videos --check-specs --fix-quicklook --replace-original
+
+# Works with queue mode for network storage
+python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --queue-mode --replace-original
+```
+
+**Implementation details:**
+- Compatibility check: `video_analyzer.py:200-283` (`check_quicklook_compatibility()`)
+- Fast remux: `encoder.py:703-779` (`remux_to_mp4()`)
+- Integration: `video_sentinel.py:588-679`
+
+**Why this is useful:**
+- Many HEVC videos in MKV containers won't preview in Finder
+- Re-encoding would take hours, remuxing takes seconds
+- Ensures entire library works with QuickLook/spacebar preview
 
 ## Common Development Patterns
 
