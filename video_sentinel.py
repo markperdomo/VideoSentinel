@@ -440,9 +440,30 @@ def main():
             if args.replace_original:
                 print("⚠️  REPLACE MODE: Original files will be deleted and replaced")
             print("="*80)
+            print()
+
+            # Check for existing valid re-encodes and filter them out
+            print("Checking for existing re-encoded outputs...")
+            videos_needing_encode = []
+            videos_already_encoded = []
+
+            for video_path, video_info in tqdm(non_compliant_videos, desc="Checking for existing outputs", unit="video"):
+                existing_output = encoder.find_existing_output(video_path, target_codec=args.target_codec)
+
+                if existing_output:
+                    videos_already_encoded.append((video_path, existing_output))
+                    tqdm.write(Colors.green(f"✓ {video_path.name}: Already has valid output ({existing_output.name})"))
+                else:
+                    videos_needing_encode.append((video_path, video_info))
+
+            print()
+            if videos_already_encoded:
+                print(f"Found {len(videos_already_encoded)} video(s) with existing valid re-encodes (skipping)")
+                print(f"Need to encode: {len(videos_needing_encode)} video(s)")
+                print()
 
             # Filter by file types if specified
-            videos_to_encode_tuples = non_compliant_videos
+            videos_to_encode_tuples = videos_needing_encode
             if args.file_types:
                 # Parse file types (remove dots and convert to lowercase)
                 target_extensions = [

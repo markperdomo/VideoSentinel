@@ -700,6 +700,50 @@ class VideoEncoder:
 
         return estimated_size
 
+    def find_existing_output(
+        self,
+        input_path: Path,
+        target_codec: str = 'hevc',
+        check_suffixes: list[str] = None
+    ) -> Optional[Path]:
+        """
+        Check if a valid re-encoded output already exists for the input file
+
+        Checks for files with suffixes like _reencoded or _quicklook
+
+        Args:
+            input_path: Path to the source video file
+            target_codec: Target codec (determines expected extension)
+            check_suffixes: List of suffixes to check (default: ['_reencoded', '_quicklook'])
+
+        Returns:
+            Path to existing valid output, or None if no valid output exists
+        """
+        if check_suffixes is None:
+            check_suffixes = ['_reencoded', '_quicklook']
+
+        # Get expected output extension
+        target_extension = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+
+        # Check for each suffix
+        for suffix in check_suffixes:
+            # Build potential output path
+            potential_output = input_path.parent / (input_path.stem + suffix + target_extension)
+
+            if potential_output.exists():
+                # Validate the existing output
+                if self._validate_output(potential_output, source_info=None):
+                    if self.verbose:
+                        tqdm.write(f"  Found valid existing output: {potential_output.name}")
+                    return potential_output
+                else:
+                    # Invalid output found - remove it
+                    if self.verbose:
+                        tqdm.write(f"  Found invalid output, removing: {potential_output.name}")
+                    potential_output.unlink()
+
+        return None
+
     def remux_to_mp4(
         self,
         input_path: Path,

@@ -252,6 +252,82 @@ Queue mode (local SSD):
 Speed improvement: 2-3x faster!
 ```
 
+#### Temporary File Management
+
+**Where temporary files are stored:**
+
+Queue mode uses a local temp directory to buffer files during the download → encode → upload pipeline.
+
+**Default location:** `/tmp/videosentinel/` (system temp directory)
+
+**Custom location (recommended):**
+```bash
+python video_sentinel.py /Volumes/NAS/videos \
+  --queue-mode --re-encode \
+  --temp-dir /Users/you/fast-ssd-temp
+```
+
+**What's stored in the temp directory:**
+- `download_<filename>` - Files downloaded from network (awaiting encoding)
+- `encoded_<filename>.mp4` - Encoded outputs (awaiting upload)
+- `queue_state.json` - State tracking for resume support
+
+**Automatic cleanup during normal operation:**
+- Downloaded originals are deleted immediately after successful encoding
+- Encoded outputs are deleted immediately after successful upload
+- State file remains for resume capability
+- Failed encodes may leave temp files (check state file for status)
+
+**Clearing the queue:**
+
+To remove all temp files and state from a previous session:
+```bash
+python video_sentinel.py --clear-queue
+```
+
+With custom temp directory:
+```bash
+python video_sentinel.py --clear-queue --temp-dir /Users/you/custom-temp
+```
+
+**What `--clear-queue` does:**
+1. Deletes `queue_state.json` (removes all tracking)
+2. Deletes ALL temp files in the directory
+   - ⚠️ **Warning:** This includes files currently downloading, encoding, or awaiting upload
+   - You'll lose any work in progress and need to start from scratch
+3. Shows how much data was cleared
+
+**Example output:**
+```
+CLEARING QUEUE STATE
+================================================================================
+Removing state file: /tmp/videosentinel/queue_state.json
+Removing 3 temp files (4523.45 MB)
+✓ Queue cleared successfully
+================================================================================
+```
+
+**When to use `--clear-queue`:**
+- After successful completion to free up temp space
+- When you want to abandon an in-progress batch and start fresh
+- If queue state becomes corrupted
+- To reclaim disk space from failed encodes
+
+**When NOT to use it:**
+- If you want to resume interrupted work (just re-run the same command instead)
+- If uploads are still in progress (they'll be lost)
+
+**Safe resume (recommended):**
+```bash
+# Interrupted during encoding? Just re-run the same command:
+python video_sentinel.py /Volumes/NAS/videos --queue-mode --re-encode
+
+# Queue mode automatically:
+# - Loads saved state from queue_state.json
+# - Resumes from where it left off
+# - Completes any partial operations
+```
+
 ### Additional Options
 
 - `-r, --recursive`: Scan subdirectories recursively

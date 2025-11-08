@@ -108,6 +108,7 @@ class NetworkQueueManager:
         # Control flags
         self.stop_event = threading.Event()
         self.paused_event = threading.Event()
+        self.encoding_complete = threading.Event()
 
         # Worker threads
         self.download_thread: Optional[threading.Thread] = None
@@ -146,6 +147,9 @@ class NetworkQueueManager:
         """
         self.encode_callback = encode_callback
 
+        # Clear the encoding complete flag (important for resumed sessions)
+        self.encoding_complete.clear()
+
         # Start worker threads
         self.download_thread = threading.Thread(target=self._download_worker, daemon=True)
         self.upload_thread = threading.Thread(target=self._upload_worker, daemon=True)
@@ -155,6 +159,9 @@ class NetworkQueueManager:
 
         # Main thread handles encoding (CPU-bound, no benefit to threading)
         self._encode_worker()
+
+        # Signal that encoding is complete (no more uploads coming)
+        self.encoding_complete.set()
 
         # Wait for all uploads to complete before exiting
         if self.verbose:
@@ -195,6 +202,9 @@ class NetworkQueueManager:
                 try:
                     queued_file = self.download_queue.get(timeout=1)
                 except queue.Empty:
+                    # Check if all files have been downloaded (no more PENDING files)
+                    if self._all_downloaded_or_failed():
+                        break
                     continue
 
                 # Update state
@@ -323,10 +333,9 @@ class NetworkQueueManager:
                 try:
                     queued_file = self.upload_queue.get(timeout=1)
                 except queue.Empty:
-                    # Check if we're completely done
-                    if (self.download_queue.empty() and
-                        self.encode_queue.empty() and
-                        self._all_downloaded_or_failed()):
+                    # Check if we're completely done (encoding finished and no more uploads)
+                    if self.encoding_complete.is_set():
+                        # Encoding is done, no more items will be added to upload queue
                         break
                     continue
 
@@ -449,25 +458,87 @@ class NetworkQueueManager:
                 self.files = [QueuedFile.from_dict(f) for f in state['files']]
 
             # Re-populate queues based on state
+            resumed_count = {'pending': 0, 'local': 0, 'encoding': 0, 'uploading': 0, 'complete': 0, 'failed': 0, 're-download': 0}
+
             for queued_file in self.files:
-                if queued_file.state == FileState.PENDING:
+                if queued_file.state == FileState.COMPLETE:
+                    # Already complete, skip
+                    resumed_count['complete'] += 1
+                    continue
+                elif queued_file.state == FileState.FAILED:
+                    # Previously failed, could retry but skip for now
+                    resumed_count['failed'] += 1
+                    continue
+                elif queued_file.state == FileState.PENDING:
+                    resumed_count['pending'] += 1
                     self.download_queue.put(queued_file)
                 elif queued_file.state == FileState.LOCAL:
-                    self.encode_queue.put(queued_file)
+                    # Validate that local file still exists
+                    if queued_file.local_path and Path(queued_file.local_path).exists():
+                        resumed_count['local'] += 1
+                        self.encode_queue.put(queued_file)
+                    else:
+                        # Local file missing, need to re-download
+                        resumed_count['re-download'] += 1
+                        if self.verbose:
+                            self.logger.info(f"Local file missing for {queued_file.source_path}, re-downloading")
+                        queued_file.state = FileState.PENDING
+                        queued_file.local_path = None
+                        self.download_queue.put(queued_file)
                 elif queued_file.state == FileState.ENCODING:
-                    # Resume encoding
-                    self.encode_queue.put(queued_file)
+                    # Validate local file exists before resuming encoding
+                    if queued_file.local_path and Path(queued_file.local_path).exists():
+                        # Resume encoding from LOCAL state (will re-encode)
+                        resumed_count['encoding'] += 1
+                        queued_file.state = FileState.LOCAL
+                        self.encode_queue.put(queued_file)
+                    else:
+                        # Local file missing, need to re-download
+                        resumed_count['re-download'] += 1
+                        if self.verbose:
+                            self.logger.info(f"Local file missing for {queued_file.source_path}, re-downloading")
+                        queued_file.state = FileState.PENDING
+                        queued_file.local_path = None
+                        self.download_queue.put(queued_file)
                 elif queued_file.state in [FileState.UPLOADING]:
                     # Resume upload (if output exists)
                     if queued_file.output_path and Path(queued_file.output_path).exists():
+                        resumed_count['uploading'] += 1
                         self.upload_queue.put(queued_file)
                     else:
-                        # Output missing, need to re-encode
-                        queued_file.state = FileState.LOCAL
-                        self.encode_queue.put(queued_file)
+                        # Output missing, check if local input exists
+                        if queued_file.local_path and Path(queued_file.local_path).exists():
+                            # Can re-encode from existing local file
+                            resumed_count['local'] += 1
+                            queued_file.state = FileState.LOCAL
+                            self.encode_queue.put(queued_file)
+                        else:
+                            # Need to re-download
+                            resumed_count['re-download'] += 1
+                            if self.verbose:
+                                self.logger.info(f"Files missing for {queued_file.source_path}, re-downloading")
+                            queued_file.state = FileState.PENDING
+                            queued_file.local_path = None
+                            queued_file.output_path = None
+                            self.download_queue.put(queued_file)
 
-            if self.verbose:
-                self.logger.info(f"Resumed from saved state: {len(self.files)} files")
+            # Show resume summary
+            print(f"Resumed from saved state: {len(self.files)} total files")
+            if resumed_count['complete'] > 0:
+                print(f"  Already complete: {resumed_count['complete']}")
+            if resumed_count['failed'] > 0:
+                print(f"  Previously failed (skipped): {resumed_count['failed']}")
+            if resumed_count['uploading'] > 0:
+                print(f"  Resuming upload: {resumed_count['uploading']}")
+            if resumed_count['local'] > 0:
+                print(f"  Resuming encoding: {resumed_count['local']}")
+            if resumed_count['encoding'] > 0:
+                print(f"  Re-encoding (interrupted): {resumed_count['encoding']}")
+            if resumed_count['pending'] > 0:
+                print(f"  Pending download: {resumed_count['pending']}")
+            if resumed_count['re-download'] > 0:
+                print(f"  Re-downloading (temp files missing): {resumed_count['re-download']}")
+            print()
 
             return True
 
