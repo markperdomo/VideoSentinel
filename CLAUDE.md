@@ -131,6 +131,19 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - State persistence for resume support (survives Ctrl+C interrupts)
 - Automatic cleanup of temp files after successful upload
 - Handles network filesystem limitations (falls back from copy2 to copy for metadata)
+- **Resume State Validation** (network_queue_manager.py:458-540):
+  - When resuming from saved state, validates temp files still exist
+  - Checks if local downloads still exist in temp dir
+  - Checks if encoded outputs still exist
+  - Automatically re-downloads if temp files missing
+  - Shows detailed resume summary with file state breakdown:
+    - Already complete (skip)
+    - Previously failed (skip)
+    - Resuming upload (output exists)
+    - Resuming encoding (local file exists)
+    - Re-encoding (interrupted, local file exists)
+    - Pending download (not started)
+    - Re-downloading (temp files missing)
 
 ### Key Design Patterns
 
@@ -236,6 +249,39 @@ Supported: .mp4, .mkv, .avi, .mov, .wmv, .flv, .webm, .m4v, .mpg, .mpeg
 - Duration tolerance: ±2 seconds when validating re-encoded videos
 - Timeout: 300 seconds (5 minutes) for integrity checks
 - Files are only deleted after successful encoding and validation
+
+**Smart Output Detection** (encoder.py:703-745)
+Before re-encoding, checks for existing valid outputs:
+- Looks for files with `_reencoded` or `_quicklook` suffixes matching the source filename
+- Validates outputs using same checks as post-encoding validation:
+  - File exists and size > 1KB
+  - ffprobe can read the file
+  - Has valid video stream with non-zero dimensions
+  - Duration matches expected values (if source info available)
+- Deletes invalid/corrupted existing outputs
+- Skips encoding if valid output already exists
+- Implementation: `find_existing_output()` method with configurable suffix list
+- Used in video_sentinel.py:447-461 to pre-check before batch encoding
+
+**Duplicate Filename Cleanup** (video_sentinel.py:816-849)
+After deleting duplicates (auto-best or interactive mode):
+- Removes `_reencoded` suffix from kept files
+- Removes `_quicklook` suffix from kept files
+- Only renames if target filename doesn't already exist
+- Preserves file organization without suffix clutter
+- Example: `video_reencoded.mp4` (kept) → `video.mp4` after deleting `video.mp4` (duplicate)
+- Shows progress: `✓ Renamed: video_reencoded.mp4 → video.mp4`
+- Handles errors gracefully (skips if target exists, shows error if rename fails)
+
+**Quality Ranking with Codec Efficiency** (video_sentinel.py:54-104)
+Duplicate quality ranking normalizes bitrate by codec efficiency:
+- HEVC/VP9: 2.0× multiplier (e.g., 3000 kbps → 6000 kbps H.264 equivalent)
+- AV1: 2.5× multiplier (e.g., 2000 kbps → 5000 kbps H.264 equivalent)
+- H.264: 1.0× baseline
+- MPEG4: 0.6× (less efficient than H.264)
+- MPEG2/WMV: 0.4-0.5× (much less efficient)
+- Ensures modern codec re-encodes rank higher than originals even at lower bitrate
+- Scoring: codec score (200-1000) + resolution pixels/1000 + normalized_bitrate/10000
 
 **CLI Flags for New Features**
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)

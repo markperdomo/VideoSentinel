@@ -559,6 +559,46 @@ In this case:
 4. **Review results**: Check summary to see success/failure count
 5. **Verify manually**: Spot-check a few re-encoded videos before bulk deletion
 
+### Smart Skip for Already Re-Encoded Videos
+
+Before starting batch re-encoding, VideoSentinel checks for existing valid outputs and automatically skips them:
+
+```bash
+python video_sentinel.py /videos --re-encode --replace-original
+
+# Output:
+# Checking for existing re-encoded outputs...
+# ✓ video1.avi: Already has valid output (video1_reencoded.mp4)
+# ✓ video2.wmv: Already has valid output (video2_reencoded.mp4)
+#
+# Found 2 video(s) with existing valid re-encodes (skipping)
+# Need to encode: 3 video(s)
+```
+
+**How it works:**
+- Scans for files with `_reencoded` or `_quicklook` suffixes matching the source filename
+- Validates each existing output using the same thorough checks as post-encoding validation
+- Deletes invalid/corrupted outputs and re-encodes from scratch
+- Skips valid outputs to save time
+
+**Benefits:**
+- **Saves hours** when resuming interrupted batch jobs
+- **Prevents wasted work** re-encoding files that are already done
+- **Validates outputs** to ensure corrupted partial files are detected and removed
+- **Works seamlessly** with both `_reencoded` and `_quicklook` suffixed files
+
+**Example scenario:**
+```bash
+# First run - encode 100 videos, interrupted after 50
+python video_sentinel.py /videos --re-encode
+
+# Second run - automatically skips the 50 completed videos
+python video_sentinel.py /videos --re-encode
+# Checking for existing re-encoded outputs...
+# Found 50 video(s) with existing valid re-encodes (skipping)
+# Need to encode: 50 video(s)
+```
+
 ### Replace Original Mode
 
 For production use after thorough testing, VideoSentinel supports replacing original files with re-encoded versions using the `--replace-original` flag:
@@ -789,7 +829,22 @@ python video_sentinel.py ~/Videos --find-duplicates --duplicate-action auto-best
 **How auto-best ranks quality:**
 - **Codec modernity**: AV1 > VP9 > HEVC > H.264 > older codecs
 - **Resolution**: Higher resolution scores higher
-- **Bitrate**: Higher bitrate typically means better quality
+- **Bitrate (normalized by codec efficiency)**: Modern codecs need less bitrate for equivalent quality
+
+**Codec Efficiency Normalization:**
+
+VideoSentinel intelligently accounts for codec efficiency when comparing bitrates:
+- **HEVC @ 3000 kbps** = equivalent to **H.264 @ 6000 kbps**
+- **AV1 @ 2000 kbps** = equivalent to **H.264 @ 5000 kbps**
+
+This ensures re-encoded videos with modern codecs are correctly ranked higher than originals, even at lower bitrates.
+
+**Efficiency multipliers:**
+- AV1: 2.5× more efficient than H.264
+- VP9, HEVC: 2.0× more efficient than H.264
+- H.264: 1.0× (baseline)
+- MPEG4: 0.6× (less efficient)
+- MPEG2, WMV: 0.4-0.5× (much less efficient)
 
 **Example output:**
 ```
@@ -856,6 +911,33 @@ Your choice: 1
 - **Report**: When you just want to see what duplicates exist
 - **Auto-best**: When you trust the quality ranking and want to automate cleanup
 - **Interactive**: When you want manual control but with quality rankings to help decide
+
+#### Automatic Filename Cleanup
+
+When using `auto-best` or `interactive` modes, VideoSentinel automatically cleans up filenames of kept files by removing `_reencoded` and `_quicklook` suffixes.
+
+**Example:**
+```
+Before:
+  video_reencoded.mp4 (HEVC, kept)
+  video.mp4 (H.264, deleted)
+
+After cleanup:
+  video.mp4 (HEVC, renamed from video_reencoded.mp4)
+```
+
+This keeps your library organized without suffix clutter.
+
+**How it works:**
+- After deleting duplicates, checks if kept files have `_reencoded` or `_quicklook` suffixes
+- Automatically renames them to remove the suffix
+- Only renames if target filename doesn't already exist
+- Shows progress: `✓ Renamed: video_reencoded.mp4 → video.mp4`
+
+**Why this is useful:**
+- If you've re-encoded files to modern codecs and then run duplicate detection, the better quality re-encoded version gets kept
+- Instead of ending up with `video_reencoded.mp4`, you get the clean `video.mp4` filename
+- Keeps your library organized and avoids filename pollution
 
 ## How Broken Video Detection Works
 

@@ -12,7 +12,7 @@ Features:
 import argparse
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from tqdm import tqdm
 
 from video_analyzer import VideoAnalyzer, VideoInfo
@@ -56,7 +56,7 @@ def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
     Rank video quality for duplicate selection
     Higher score = better quality
 
-    Considers: codec modernity, resolution, bitrate
+    Considers: codec modernity, resolution, bitrate (normalized by codec efficiency)
     """
     score = 0
 
@@ -65,8 +65,11 @@ def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
         'av1': 1000,
         'vp9': 900,
         'hevc': 800,
+        'hvc1': 800,  # HEVC variant (macOS QuickLook compatible)
         'h265': 800,
         'h264': 400,
+        'avc1': 400,  # H.264 variant
+        'avc': 400,   # H.264 variant
         'mpeg4': 200,
         'mpeg2': 100,
         'wmv': 50,
@@ -77,8 +80,27 @@ def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
     # Resolution scoring (pixels)
     score += video_info.width * video_info.height // 1000
 
-    # Bitrate scoring (higher bitrate usually means better quality)
-    score += video_info.bitrate // 10000
+    # Bitrate scoring - normalized by codec efficiency
+    # Modern codecs need less bitrate for same quality, so we normalize to H.264 equivalent
+    codec_efficiency = {
+        'av1': 2.5,    # AV1 is ~2.5x more efficient than H.264
+        'vp9': 2.0,    # VP9 is ~2x more efficient than H.264
+        'hevc': 2.0,   # HEVC is ~2x more efficient than H.264
+        'hvc1': 2.0,   # HEVC variant
+        'h265': 2.0,   # HEVC alternate name
+        'h264': 1.0,   # Baseline
+        'avc1': 1.0,   # H.264 variant
+        'avc': 1.0,    # H.264 variant
+        'mpeg4': 0.6,  # MPEG4 is less efficient than H.264
+        'mpeg2': 0.4,  # MPEG2 is much less efficient
+        'wmv': 0.5,    # Old codecs are less efficient
+        'xvid': 0.6,
+    }
+
+    efficiency = codec_efficiency.get(video_info.codec.lower(), 1.0)
+    # Normalize bitrate to H.264 equivalent (multiply by efficiency factor)
+    normalized_bitrate = video_info.bitrate * efficiency
+    score += int(normalized_bitrate // 10000)
 
     return score
 
@@ -89,7 +111,7 @@ def handle_duplicate_group(
     analyzer: VideoAnalyzer,
     action: str,
     verbose: bool = False
-) -> List[Path]:
+) -> tuple[List[Path], Optional[Path]]:
     """
     Handle a duplicate group based on action
 
@@ -101,13 +123,14 @@ def handle_duplicate_group(
         verbose: Enable verbose output
 
     Returns:
-        List of videos to delete
+        Tuple of (videos to delete, video to keep)
     """
     to_delete = []
+    to_keep = None
 
     if action == 'report':
         # Just report, no action
-        return to_delete
+        return to_delete, to_keep
 
     # Get video info for all duplicates
     video_infos = {}
@@ -118,7 +141,7 @@ def handle_duplicate_group(
 
     if not video_infos:
         print(f"  {Colors.yellow('Warning: Could not analyze videos in this group')}")
-        return to_delete
+        return to_delete, to_keep
 
     # Rank videos by quality
     ranked_videos = sorted(
@@ -130,6 +153,7 @@ def handle_duplicate_group(
     if action == 'auto-best':
         # Keep the best, mark others for deletion
         best_video = ranked_videos[0]
+        to_keep = best_video
         to_delete = [v for v in ranked_videos if v != best_video]
 
         print(f"  {Colors.green('✓ Keeping:')} {best_video.name}")
@@ -167,6 +191,7 @@ def handle_duplicate_group(
         if choice.isdigit() and 1 <= int(choice) <= len(ranked_videos):
             keep_idx = int(choice) - 1
             keep_video = ranked_videos[keep_idx]
+            to_keep = keep_video
             to_delete = [v for v in ranked_videos if v != keep_video]
 
             print(f"\n  {Colors.green('✓ Keeping:')} {keep_video.name}")
@@ -176,7 +201,7 @@ def handle_duplicate_group(
         else:
             print(f"  {Colors.yellow('→ No action, keeping all')}")
 
-    return to_delete
+    return to_delete, to_keep
 
 
 def main():
@@ -713,6 +738,7 @@ def main():
             print(f"\nFound {len(duplicate_groups)} groups of duplicate videos:\n")
 
             all_to_delete = []
+            all_to_keep = []
 
             if args.duplicate_action == 'report':
                 # Just report duplicates, no action
@@ -726,7 +752,7 @@ def main():
                 # Handle each group with auto-best or interactive
                 for group_name, videos in duplicate_groups.items():
                     print(f"\n{group_name}:")
-                    to_delete = handle_duplicate_group(
+                    to_delete, to_keep = handle_duplicate_group(
                         group_name,
                         videos,
                         analyzer,
@@ -734,6 +760,8 @@ def main():
                         args.verbose
                     )
                     all_to_delete.extend(to_delete)
+                    if to_keep:
+                        all_to_keep.append(to_keep)
                     print()
 
                 # Perform deletions if any
@@ -784,6 +812,44 @@ def main():
                         print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
                         print(f"Space freed: {total_size_freed / (1024*1024):.2f} MB")
                     print()
+
+                    # Clean up filenames of kept files (remove _reencoded and _quicklook suffixes)
+                    if all_to_keep:
+                        print("="*80)
+                        print("CLEANING UP FILENAMES")
+                        print("="*80)
+                        print()
+
+                        renamed_count = 0
+                        for video in all_to_keep:
+                            # Check if filename has _reencoded or _quicklook suffix
+                            stem = video.stem
+                            if stem.endswith('_reencoded') or stem.endswith('_quicklook'):
+                                # Remove the suffix
+                                if stem.endswith('_reencoded'):
+                                    new_stem = stem[:-len('_reencoded')]
+                                else:
+                                    new_stem = stem[:-len('_quicklook')]
+
+                                new_path = video.parent / (new_stem + video.suffix)
+
+                                # Check if target path already exists
+                                if new_path.exists():
+                                    print(f"  {Colors.yellow('⚠')} Skipping {video.name}: {new_path.name} already exists")
+                                else:
+                                    try:
+                                        video.rename(new_path)
+                                        renamed_count += 1
+                                        print(f"  {Colors.green('✓')} Renamed: {video.name} → {new_path.name}")
+                                    except Exception as e:
+                                        print(f"  {Colors.red('✗')} Failed to rename {video.name}: {e}")
+
+                        if renamed_count > 0:
+                            print()
+                            print(f"Renamed {renamed_count} file(s)")
+                        else:
+                            print(f"No files needed renaming")
+                        print()
                 else:
                     print(f"\n{Colors.yellow('No duplicates marked for deletion')}")
 
