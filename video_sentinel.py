@@ -414,12 +414,28 @@ def main():
     duplicate_detector = DuplicateDetector(verbose=args.verbose)
     issue_detector = IssueDetector(verbose=args.verbose)
 
-    # Find all video files
+    # Parse file types filter if specified
+    file_types_filter = None
+    if args.file_types:
+        file_types_filter = [
+            ext.strip().lower().lstrip('.')
+            for ext in args.file_types.split(',')
+        ]
+        print(f"File type filter: {', '.join(file_types_filter).upper()}")
+
+    # Find all video files (filtered by file types if specified)
     print("Finding video files...")
-    video_files = analyzer.find_videos(args.directory, recursive=args.recursive)
+    video_files = analyzer.find_videos(
+        args.directory,
+        recursive=args.recursive,
+        file_types=file_types_filter
+    )
 
     if not video_files:
-        print("No video files found.")
+        if file_types_filter:
+            print(f"No video files found matching types: {', '.join(file_types_filter).upper()}")
+        else:
+            print("No video files found.")
         sys.exit(0)
 
     print(f"Found {len(video_files)} video files")
@@ -493,38 +509,13 @@ def main():
                 print(f"Need to encode: {len(videos_needing_encode)} video(s)")
                 print()
 
-            # Filter by file types if specified
-            videos_to_encode_tuples = videos_needing_encode
-            if args.file_types:
-                # Parse file types (remove dots and convert to lowercase)
-                target_extensions = [
-                    ext.strip().lower().lstrip('.')
-                    for ext in args.file_types.split(',')
-                ]
-
-                # Filter videos by extension
-                filtered_videos = [
-                    (path, info) for path, info in non_compliant_videos
-                    if path.suffix.lower().lstrip('.') in target_extensions
-                ]
-
-                skipped_count = len(non_compliant_videos) - len(filtered_videos)
-
-                print()
-                print(f"File type filter: {', '.join(target_extensions).upper()}")
-                print(f"Videos matching filter: {len(filtered_videos)}")
-                if skipped_count > 0:
-                    print(f"Videos skipped (other formats): {skipped_count}")
-                print()
-
-                videos_to_encode_tuples = filtered_videos
-
-            if not videos_to_encode_tuples:
-                print("No videos match the file type filter.")
+            # Note: File type filtering now happens at the find_videos stage
+            if not videos_needing_encode:
+                print("No videos need encoding.")
                 print()
             else:
-                videos_to_encode = [v[0] for v in videos_to_encode_tuples]
-                video_infos_dict = {v[0]: v[1] for v in videos_to_encode_tuples}
+                videos_to_encode = [v[0] for v in videos_needing_encode]
+                video_infos_dict = {v[0]: v[1] for v in videos_needing_encode}
 
                 # Use queue mode if enabled
                 if args.queue_mode:

@@ -33,8 +33,14 @@ python video_sentinel.py /path/to/videos --check-issues --deep-scan
 # Re-encode non-compliant videos with smart quality matching
 python video_sentinel.py /path/to/videos --check-specs --re-encode
 
-# Re-encode only specific file types (great for cleaning up legacy formats)
+# Process only specific file types (filters at file discovery - applies to all operations)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
+
+# Find duplicates only among AVI files
+python video_sentinel.py /path/to/videos --find-duplicates --file-types avi
+
+# Check issues only for WMV and FLV files
+python video_sentinel.py /path/to/videos --check-issues --file-types wmv,flv
 
 # Replace original files with re-encoded versions (deletes source, renames output)
 # Safe to interrupt and resume - automatically detects completed/partial work
@@ -305,6 +311,10 @@ Duplicate quality ranking normalizes bitrate by codec efficiency:
 - Scoring: codec score (200-1000) + resolution pixels/1000 + normalized_bitrate/10000
 
 **CLI Flags for New Features**
+- `--file-types TYPES`: Comma-separated file extensions to process (e.g., `wmv,avi,mov`)
+  - Filters files at discovery stage (applies to all operations: check-specs, duplicates, issues, re-encode)
+  - More efficient than scanning all files then filtering later
+  - Only files matching specified extensions are loaded, analyzed, and processed
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
 - `--temp-dir PATH`: Temp directory for queue mode (default: system temp)
@@ -513,6 +523,43 @@ python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --que
 - Many HEVC videos in MKV containers won't preview in Finder
 - Re-encoding would take hours, remuxing takes seconds
 - Ensures entire library works with QuickLook/spacebar preview
+
+### Filtering by File Type
+
+The `--file-types` flag filters files at the discovery stage for maximum efficiency:
+
+**How it works:**
+- Filters files when scanning the directory (before any analysis)
+- Only matching files are loaded, checked, analyzed, and processed
+- Applies to all operations: spec checking, duplicate detection, issue detection, re-encoding
+- More efficient than loading all files then filtering later
+
+**Usage examples:**
+```bash
+# Only process WMV and AVI files for re-encoding
+python video_sentinel.py /videos --check-specs --re-encode --file-types wmv,avi
+
+# Find duplicates only among MOV files
+python video_sentinel.py /videos --find-duplicates --file-types mov
+
+# Check issues only for legacy FLV files
+python video_sentinel.py /videos --check-issues --file-types flv
+
+# Combine with other flags
+python video_sentinel.py /videos --check-specs --re-encode --file-types wmv,avi,mov \
+  --replace-original --queue-mode
+```
+
+**Benefits:**
+- **Faster scanning**: Only searches for specified file types
+- **Less memory**: Doesn't load unnecessary files into memory
+- **Cleaner output**: Only shows results for files you care about
+- **Targeted operations**: Perfect for cleaning up legacy format collections
+
+**Implementation details:**
+- File type parsing: `video_sentinel.py:417-424`
+- Filter application: `video_analyzer.py:313-358` (`find_videos()` method)
+- Supports any extension: wmv, avi, mov, mkv, mp4, flv, webm, m4v, mpg, mpeg
 
 ## Common Development Patterns
 

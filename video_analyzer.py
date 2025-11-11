@@ -310,24 +310,49 @@ class VideoAnalyzer:
 
         return True
 
-    def find_videos(self, directory: Path, recursive: bool = False) -> List[Path]:
+    def find_videos(
+        self,
+        directory: Path,
+        recursive: bool = False,
+        file_types: Optional[List[str]] = None
+    ) -> List[Path]:
         """
         Find all video files in a directory
 
         Args:
             directory: Directory to scan
             recursive: Whether to scan recursively
+            file_types: Optional list of file extensions to filter (e.g., ['wmv', 'avi', 'mov'])
+                       If None, uses all VIDEO_EXTENSIONS
 
         Returns:
             List of video file paths
         """
         video_files = []
 
+        # Determine which extensions to search for
+        if file_types:
+            # Normalize extensions (remove dots, convert to lowercase, add dot prefix)
+            extensions = {
+                f'.{ext.strip().lower().lstrip(".")}'
+                for ext in file_types
+            }
+            # Filter to only valid video extensions
+            search_extensions = extensions & self.VIDEO_EXTENSIONS
+            if not search_extensions:
+                # No valid video extensions provided
+                if self.verbose:
+                    print(f"Warning: No valid video extensions in file_types: {file_types}")
+                return []
+        else:
+            search_extensions = self.VIDEO_EXTENSIONS
+
+        # Search for files
         if recursive:
-            for ext in self.VIDEO_EXTENSIONS:
+            for ext in search_extensions:
                 video_files.extend(directory.rglob(f'*{ext}'))
         else:
-            for ext in self.VIDEO_EXTENSIONS:
+            for ext in search_extensions:
                 video_files.extend(directory.glob(f'*{ext}'))
 
         return sorted(video_files)
