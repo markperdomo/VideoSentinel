@@ -73,6 +73,12 @@ python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode 
 
 # Clear queue state and temp files
 python video_sentinel.py --clear-queue
+
+# Monitor queue mode status (during or after encoding)
+python monitor_queue.py
+
+# Monitor with custom temp dir
+python monitor_queue.py --temp-dir /Users/you/temp
 ```
 
 ### Testing Individual Modules
@@ -428,6 +434,121 @@ python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode 
 - Encoding uses main thread (CPU-bound, no threading benefit)
 - Queue states: PENDING → DOWNLOADING → LOCAL → ENCODING → UPLOADING → COMPLETE
 - State persisted to JSON for resume capability
+
+**Failure handling in queue mode:**
+
+When an encode fails in queue mode (network_queue_manager.py:311-329):
+
+1. **Immediate actions:**
+   - File is marked with `FileState.FAILED`
+   - Error message is stored in the `error` field
+   - Temp files are cleaned up immediately (downloaded file deleted)
+   - State is saved to disk
+   - Original source file is never touched/deleted
+
+2. **Progress reporting:**
+   - Failed files are counted and displayed in the final summary
+   - Shows "Failed: X" in red at completion
+   - Does not count toward "Completed" count
+
+3. **Resume behavior (network_queue_manager.py:478-481):**
+   - Failed files are **NOT automatically retried** on resume
+   - Shown in resume summary as "Previously failed (skipped): X"
+   - Files remain in FAILED state across resume sessions
+   - Must be manually re-run if desired (remove from state or start fresh)
+
+4. **Common failure causes:**
+   - Encoding errors (corrupted source, unsupported codec)
+   - Disk space issues (temp storage full)
+   - FFmpeg crashes or timeouts
+   - Download failures (network issues)
+
+5. **Handling failed files:**
+   ```bash
+   # Option 1: Clear state and retry all files (including previously failed)
+   python video_sentinel.py --clear-queue
+   python video_sentinel.py /Volumes/NAS/videos --check-specs --re-encode --queue-mode
+
+   # Option 2: Process failed files individually without queue mode
+   # (Review error messages in logs to identify which files failed)
+   ```
+
+6. **Why failed files aren't automatically retried:**
+   - Prevents infinite retry loops on permanently corrupted files
+   - Allows user to inspect and fix issues before retrying
+   - Saves time by not repeatedly attempting impossible encodes
+   - State file provides a record of what failed for manual review
+
+**Safety guarantees:**
+- Failed encodes never delete or modify original source files
+- Temp files are cleaned up to avoid disk space waste
+- State is saved so you can review what failed
+- Can safely interrupt and resume without losing failure information
+
+**Monitoring queue status:**
+
+Queue state is persisted to disk for monitoring and resume support:
+
+1. **State file location** (network_queue_manager.py:92,119):
+   ```
+   Default: /tmp/videosentinel/queue_state.json
+   Custom:  <your-temp-dir>/queue_state.json
+   ```
+
+2. **Temp directory location**:
+   ```
+   Default: /tmp/videosentinel/
+   Custom:  <your-temp-dir>/
+   ```
+
+3. **State file contents (JSON)**:
+   - List of all files with their current state
+   - Error messages for failed files
+   - File paths (source, local temp, output, final destination)
+   - Can be inspected manually or with monitoring script
+
+4. **Temp directory contents**:
+   - `download_<filename>`: Downloaded files waiting to encode
+   - `encoded_<filename>.mp4`: Encoded files waiting to upload
+   - `queue_state.json`: State file
+   - **Note**: Temp files are automatically deleted when:
+     - Encoding fails (downloaded file cleaned up)
+     - Upload succeeds (both download and encoded files cleaned up)
+     - `--clear-queue` is run
+
+5. **Monitoring with included script**:
+   ```bash
+   # View queue status and progress
+   python monitor_queue.py
+
+   # Monitor queue with custom temp dir
+   python monitor_queue.py --temp-dir /Users/you/temp
+
+   # Show all files including completed
+   python monitor_queue.py --all
+
+   # Show only failed files
+   python monitor_queue.py --failed-only
+   ```
+
+   The monitor shows:
+   - Queue summary (pending, downloading, encoding, uploading, complete, failed counts)
+   - Progress percentage
+   - Failed files with error messages
+   - Temp directory size and contents
+   - Detailed file-by-file status
+
+6. **Manual state file inspection**:
+   ```bash
+   # View the raw state file
+   cat /tmp/videosentinel/queue_state.json | python -m json.tool
+
+   # Check temp directory size
+   du -sh /tmp/videosentinel/
+
+   # List temp files
+   ls -lh /tmp/videosentinel/
+   ```
 
 ### Managing Duplicate Videos
 
