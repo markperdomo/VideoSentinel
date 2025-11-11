@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from tqdm import tqdm
 from video_analyzer import VideoInfo
+from shutdown_manager import shutdown_requested
 
 
 class VideoEncoder:
@@ -621,6 +622,16 @@ class VideoEncoder:
         total = len(video_paths)
 
         for idx, video_path in enumerate(video_paths, start=1):
+            # Check for graceful shutdown request
+            if shutdown_requested():
+                print()
+                print("="*60)
+                print("SHUTDOWN REQUESTED - Stopping after current video")
+                print("="*60)
+                print(f"Processed {idx - 1}/{total} videos before shutdown")
+                print()
+                break
+
             output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
 
             # Get video info for this video if available

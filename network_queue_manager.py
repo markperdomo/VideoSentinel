@@ -23,6 +23,7 @@ from typing import List, Optional, Dict, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
 import logging
+from shutdown_manager import shutdown_requested
 
 
 class FileState(Enum):
@@ -254,6 +255,15 @@ class NetworkQueueManager:
         """Main thread worker: Encodes files locally"""
         while not self.stop_event.is_set():
             try:
+                # Check for graceful shutdown request
+                if shutdown_requested():
+                    print()
+                    print("="*60)
+                    print("SHUTDOWN REQUESTED - Finishing current video then stopping")
+                    print("="*60)
+                    # Process current item if available, then break
+                    self.stop_event.set()  # Signal other threads to stop
+
                 # Get next file to encode (with timeout)
                 try:
                     queued_file = self.encode_queue.get(timeout=1)

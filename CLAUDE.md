@@ -145,6 +145,16 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
     - Pending download (not started)
     - Re-downloading (temp files missing)
 
+**shutdown_manager.py** (Graceful Shutdown Control)
+- Provides thread-safe graceful shutdown mechanism during batch operations
+- Background daemon thread monitors for 'q' key press
+- Uses platform-specific input methods: `select()` on Unix, blocking input on Windows
+- Sets terminal to raw mode on Unix for immediate key detection (no Enter needed)
+- Thread-safe shutdown flag protected by locks for concurrent access
+- Singleton pattern with global instance for easy access across modules
+- Automatically stops listener threads when operations complete
+- No external dependencies beyond Python standard library
+
 ### Key Design Patterns
 
 **Dataclasses for Type Safety**
@@ -201,6 +211,17 @@ During video encoding, the encoder displays live progress information with queue
 5. Shows final stats: `✓ [1/5] Completed: video.wmv (avg 45.2 fps, 1.8x speed)`
 6. Format: `Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x`
 7. Error messages also include position: `✗ [1/5] Error encoding video.wmv`
+
+**Graceful Shutdown Manager** (shutdown_manager.py)
+Provides thread-safe graceful shutdown during batch encoding operations:
+1. Background thread monitors for 'q' key press using platform-specific input methods
+2. Uses `select()` on Unix-like systems (macOS/Linux) for non-blocking input detection
+3. Falls back to simpler blocking approach on Windows or when raw mode unavailable
+4. Sets thread-safe shutdown flag when key is detected
+5. Encoding loops check flag between videos and exit gracefully after current video
+6. Automatically cleans up listener threads when encoding completes
+7. Works in both batch encoding mode and queue mode
+8. Implementation: Singleton pattern with `get_shutdown_manager()` for global access
 
 ### Dependencies
 
@@ -328,6 +349,36 @@ python video_sentinel.py /videos --re-encode --replace-original
 - **Never encoded:** Encodes normally
 
 This means you can safely interrupt large batch jobs and resume without wasting work!
+
+### Graceful Shutdown with Key Press
+
+For more controlled shutdown during batch encoding, VideoSentinel supports graceful shutdown by pressing the 'q' key:
+
+**How it works:**
+- Press the `q` key at any time during encoding
+- VideoSentinel will finish the current video, then stop
+- Progress is saved automatically (same as Ctrl+C)
+- Next run will resume from where you left off
+
+**Usage:**
+```bash
+# Start batch encoding
+python video_sentinel.py /videos --re-encode --replace-original
+
+# During encoding, press 'q' to stop gracefully
+# The current video will finish encoding, then the process stops
+```
+
+**Key differences from Ctrl+C:**
+- **Ctrl+C**: Immediate interrupt (may stop mid-encode, but safe due to validation)
+- **'q' key**: Graceful shutdown (finishes current video first)
+- Both are safe and support resume
+
+**When to use:**
+- Use `q` when you want to stop cleanly after the current video completes
+- Use Ctrl+C when you need to stop immediately
+
+**Note:** The 'q' key listener works in both standard batch mode and queue mode. In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit.
 
 ### Network Queue Mode for Network Storage
 

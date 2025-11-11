@@ -20,6 +20,7 @@ from duplicate_detector import DuplicateDetector
 from issue_detector import IssueDetector
 from encoder import VideoEncoder
 from network_queue_manager import NetworkQueueManager
+from shutdown_manager import start_shutdown_listener, stop_shutdown_listener
 
 
 # ANSI color codes for terminal output
@@ -464,8 +465,13 @@ def main():
             print("(Using smart quality matching to preserve visual quality)")
             if args.replace_original:
                 print("⚠️  REPLACE MODE: Original files will be deleted and replaced")
+            print()
+            print("💡 TIP: Press 'q' at any time to stop after the current video")
             print("="*80)
             print()
+
+            # Start shutdown listener for graceful exit
+            start_shutdown_listener()
 
             # Check for existing valid re-encodes and filter them out
             print("Checking for existing re-encoded outputs...")
@@ -616,20 +622,28 @@ def main():
                         print("INTERRUPTED - Saving state...")
                         print("="*80)
                         queue_manager.stop()
+                        stop_shutdown_listener()
                         print()
                         print("Progress saved. Run the same command again to resume.")
                         print()
                         sys.exit(0)
+                    finally:
+                        # Stop shutdown listener when queue mode completes
+                        stop_shutdown_listener()
 
                 else:
                     # Standard batch encoding (no queue)
-                    encoder.batch_re_encode(
-                        videos_to_encode,
-                        output_dir=args.output_dir,
-                        target_codec=args.target_codec,
-                        video_infos=video_infos_dict,
-                        replace_original=args.replace_original
-                    )
+                    try:
+                        encoder.batch_re_encode(
+                            videos_to_encode,
+                            output_dir=args.output_dir,
+                            target_codec=args.target_codec,
+                            video_infos=video_infos_dict,
+                            replace_original=args.replace_original
+                        )
+                    finally:
+                        # Stop shutdown listener when batch encoding completes
+                        stop_shutdown_listener()
 
         # Fix QuickLook compatibility if requested
         if args.fix_quicklook and compliant_videos:
