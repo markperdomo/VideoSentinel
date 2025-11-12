@@ -169,7 +169,8 @@ def handle_duplicate_group(
 
     elif action == 'interactive':
         # Show options and let user choose
-        print(f"\n{Colors.bold(group_name)} - {len(videos)} duplicates found:")
+        print()
+        print(f"{Colors.bold(group_name)} - {len(videos)} duplicates found:")
         print()
 
         for idx, video in enumerate(ranked_videos, 1):
@@ -195,7 +196,8 @@ def handle_duplicate_group(
             to_keep = keep_video
             to_delete = [v for v in ranked_videos if v != keep_video]
 
-            print(f"\n  {Colors.green('✓ Keeping:')} {keep_video.name}")
+            print()
+            print(f"  {Colors.green('✓ Keeping:')} {keep_video.name}")
             for video in to_delete:
                 file_size_mb = video.stat().st_size / (1024 * 1024)
                 print(f"  {Colors.red('✗ Will delete:')} {video.name} ({file_size_mb:.2f} MB)")
@@ -762,7 +764,9 @@ def main():
             duplicate_groups = duplicate_detector.find_duplicates(video_files)
 
         if duplicate_groups:
-            print(f"\nFound {len(duplicate_groups)} groups of duplicate videos:\n")
+            print()
+            print(f"Found {len(duplicate_groups)} groups of duplicate videos:")
+            print()
 
             all_to_delete = []
             all_to_keep = []
@@ -778,7 +782,7 @@ def main():
             else:
                 # Handle each group with auto-best or interactive
                 for group_name, videos in duplicate_groups.items():
-                    print(f"\n{group_name}:")
+                    print(f"{group_name}:")
                     to_delete, to_keep = handle_duplicate_group(
                         group_name,
                         videos,
@@ -878,11 +882,13 @@ def main():
                             print(f"No files needed renaming")
                         print()
                 else:
-                    print(f"\n{Colors.yellow('No duplicates marked for deletion')}")
+                    print()
+                    print(f"{Colors.yellow('No duplicates marked for deletion')}")
 
             print(f"Total duplicates: {sum(len(v) for v in duplicate_groups.values())} videos in {len(duplicate_groups)} groups")
         else:
-            print("\nNo duplicate videos found.")
+            print()
+            print("No duplicate videos found.")
 
         print()
 
@@ -903,7 +909,7 @@ def main():
 
             if issues:
                 videos_with_issues.append((video_path, issues))
-                tqdm.write(f"\n{video_path.name}:")
+                tqdm.write(f"{video_path.name}:")
                 for issue in issues:
                     severity_symbol = {
                         'critical': '✗',

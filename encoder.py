@@ -346,9 +346,9 @@ class VideoEncoder:
             if not skip_encoding:
                 # Display which file we're encoding with position in queue
                 if current_index and total_count:
-                    tqdm.write(f"\n[{current_index}/{total_count}] Encoding: {input_path.name}")
+                    tqdm.write(f"[{current_index}/{total_count}] Encoding: {input_path.name}")
                 else:
-                    tqdm.write(f"\nEncoding: {input_path.name}")
+                    tqdm.write(f"Encoding: {input_path.name}")
 
                 if self.verbose:
                     tqdm.write(f"  Output: {output_path.name}")
@@ -403,10 +403,11 @@ class VideoEncoder:
                 # Wait for process to complete
                 process.wait()
 
-                # Print newline after progress updates to move to next line
+                # Clear the progress line before printing completion message
                 # Only needed if we were showing inline progress (non-verbose mode)
                 if last_progress and not self.verbose:
-                    print()  # New line after progress
+                    # Clear the line by printing spaces, then move to start of line
+                    print("\r" + " " * 100 + "\r", end='', flush=True)
 
                 # Check return code
                 if process.returncode != 0:
@@ -444,9 +445,9 @@ class VideoEncoder:
             else:
                 # Skipped encoding, but show we're resuming
                 if current_index and total_count:
-                    tqdm.write(f"\n[{current_index}/{total_count}] Resuming: {input_path.name} (already encoded)")
+                    tqdm.write(f"[{current_index}/{total_count}] Resuming: {input_path.name} (already encoded)")
                 else:
-                    tqdm.write(f"\nResuming: {input_path.name} (already encoded)")
+                    tqdm.write(f"Resuming: {input_path.name} (already encoded)")
 
             # Handle file replacement logic (only after successful validation)
             if replace_original:
@@ -668,12 +669,10 @@ class VideoEncoder:
         for idx, video_path in enumerate(video_paths, start=1):
             # Check for graceful shutdown request
             if shutdown_requested():
-                print()
                 print("="*60)
                 print("SHUTDOWN REQUESTED - Stopping after current video")
                 print("="*60)
                 print(f"Processed {idx - 1}/{total} videos before shutdown")
-                print()
                 break
 
             output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
@@ -699,9 +698,10 @@ class VideoEncoder:
 
         # Print summary
         successful = sum(1 for v in results.values() if v)
-        print(f"\n{'='*60}")
+        print()
+        print("="*60)
         print(f"Re-encoding complete: {successful}/{len(video_paths)} successful")
-        print(f"{'='*60}")
+        print("="*60)
 
         return results
 
