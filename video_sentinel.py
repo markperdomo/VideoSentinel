@@ -400,7 +400,7 @@ def main():
         args.check_specs = True
 
     # If no action specified at all, show all checks by default
-    if not any([args.check_specs, args.find_duplicates, args.check_issues, args.re_encode, args.fix_quicklook]):
+    if not any([args.check_specs, args.find_duplicates, args.filename_duplicates, args.check_issues, args.re_encode, args.fix_quicklook]):
         args.check_specs = True
         args.find_duplicates = True
         args.check_issues = True
