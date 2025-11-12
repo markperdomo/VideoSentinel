@@ -241,7 +241,7 @@ class VideoEncoder:
                 tqdm.write(f"  Found existing output file ({existing_size / (1024*1024):.1f} MB)")
 
             # Validate existing file - if it's valid, skip re-encoding
-            if self._validate_output(output_path, video_info):
+            if self._validate_output(output_path, video_info, lenient=self.recovery_mode):
                 if self.verbose:
                     tqdm.write(f"  Existing output is valid, skipping re-encode")
                 skip_encoding = True
@@ -265,7 +265,7 @@ class VideoEncoder:
             # If final path exists and is valid, and it's the same as output path,
             # but original still exists, we need to remove the original
             if final_path.exists() and final_path == output_path and input_path.exists() and input_path != final_path:
-                if self._validate_output(final_path, video_info):
+                if self._validate_output(final_path, video_info, lenient=self.recovery_mode):
                     if self.verbose:
                         tqdm.write(f"  Found valid final output, completing interrupted replacement")
                     input_path.unlink()
@@ -418,7 +418,7 @@ class VideoEncoder:
                     return False
 
                 # Validate output before considering it successful
-                if not self._validate_output(output_path, video_info):
+                if not self._validate_output(output_path, video_info, lenient=self.recovery_mode):
                     if current_index and total_count:
                         tqdm.write(f"✗ [{current_index}/{total_count}] Output validation failed for {input_path.name}")
                     else:
@@ -493,7 +493,8 @@ class VideoEncoder:
         self,
         output_path: Path,
         source_info: Optional[VideoInfo] = None,
-        duration_tolerance: float = 2.0
+        duration_tolerance: float = 2.0,
+        lenient: bool = False
     ) -> bool:
         """
         Validate that the encoded output file is valid and playable
@@ -502,6 +503,7 @@ class VideoEncoder:
             output_path: Path to the encoded output file
             source_info: Optional VideoInfo of source for comparison
             duration_tolerance: Allowed duration difference in seconds
+            lenient: If True, use lenient validation for recovery mode (allows duration mismatches)
 
         Returns:
             True if output is valid, False otherwise
@@ -565,18 +567,33 @@ class VideoEncoder:
                 output_duration = float(format_info.get('duration', 0))
 
                 if output_duration == 0:
-                    if self.verbose:
-                        tqdm.write(f"  Validation failed: Output has no duration")
-                    return False
-
-                duration_diff = abs(output_duration - source_info.duration)
-                if duration_diff > duration_tolerance:
-                    if self.verbose:
-                        tqdm.write(f"  Validation failed: Duration mismatch ({output_duration:.1f}s vs {source_info.duration:.1f}s)")
-                    return False
-
+                    if lenient:
+                        # In recovery mode, allow files with no duration metadata
+                        if self.verbose:
+                            tqdm.write(f"  Validation passed (lenient): {width}x{height}, no duration metadata (recovered file)")
+                    else:
+                        if self.verbose:
+                            tqdm.write(f"  Validation failed: Output has no duration")
+                        return False
+                else:
+                    duration_diff = abs(output_duration - source_info.duration)
+                    if duration_diff > duration_tolerance:
+                        if lenient:
+                            # In recovery mode, allow significant duration differences
+                            # Just warn but don't fail - corrupted source may have wrong duration metadata
+                            if self.verbose:
+                                tqdm.write(f"  Validation passed (lenient): {width}x{height}, {output_duration:.1f}s (source was {source_info.duration:.1f}s, recovered file may differ)")
+                        else:
+                            if self.verbose:
+                                tqdm.write(f"  Validation failed: Duration mismatch ({output_duration:.1f}s vs {source_info.duration:.1f}s)")
+                            return False
+                    else:
+                        if self.verbose:
+                            tqdm.write(f"  Validation passed: {width}x{height}, {output_duration:.1f}s")
+            else:
+                # No source info to compare against
                 if self.verbose:
-                    tqdm.write(f"  Validation passed: {width}x{height}, {output_duration:.1f}s")
+                    tqdm.write(f"  Validation passed: {width}x{height} (no source comparison)")
 
             return True
 
@@ -767,7 +784,7 @@ class VideoEncoder:
 
             if potential_output.exists():
                 # Validate the existing output
-                if self._validate_output(potential_output, source_info=None):
+                if self._validate_output(potential_output, source_info=None, lenient=self.recovery_mode):
                     if self.verbose:
                         tqdm.write(f"  Found valid existing output: {potential_output.name}")
                     return potential_output

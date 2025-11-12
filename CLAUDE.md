@@ -467,6 +467,14 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --f
 - ✓ Files that crash standard ffmpeg encoding
 - ✓ Partially downloaded or incomplete files
 
+**Recovery mode validation:**
+
+When `--recover` is enabled, output validation becomes more lenient:
+- Allows recovered files to have different durations than source (corrupted sources may have wrong metadata)
+- Allows files with missing duration metadata (common in heavily corrupted recoveries)
+- Still validates: file exists, has video stream, has valid dimensions, and is readable by ffprobe
+- This prevents false-negative validation failures for successfully recovered files
+
 **Limitations:**
 - Cannot recover completely unreadable files (0 bytes, wrong format, etc.)
 - May result in shorter duration if large portions are corrupted
