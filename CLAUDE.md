@@ -344,7 +344,8 @@ Duplicate quality ranking normalizes bitrate by codec efficiency:
   - Example: groups `video.avi`, `video_reencoded.mp4`, `video.mkv` as duplicates
 - `--recover`: Enable error recovery mode during re-encoding
   - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
-  - Flags used: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-max_error_rate 1.0`
+  - Input flags (before `-i`): `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
+  - Output flags (after `-i`): `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
   - Ignores decoding errors, generates missing timestamps, discards corrupted packets
   - Useful for recovering videos that won't play or fail to encode normally
   - Combined with `--re-encode` flag
@@ -434,10 +435,15 @@ VideoSentinel can attempt to recover broken videos using FFmpeg's error recovery
 **How error recovery works:**
 
 The `--recover` flag enables FFmpeg's error-tolerant flags:
+
+Input options (before `-i`):
 - `-err_detect ignore_err`: Ignores decoding errors and continues processing
 - `-fflags +genpts+discardcorrupt+igndts`: Generates missing timestamps, discards corrupted packets, ignores DTS errors
-- `-max_error_rate 1.0`: Allows 100% error rate (doesn't fail on errors)
+- `-ignore_unknown`: Ignores unknown stream types
+
+Output options (after `-i`):
 - `-max_muxing_queue_size 1024`: Increases buffer for problematic files
+- `-max_error_rate 1.0`: Allows 100% error rate (doesn't fail on errors)
 
 **Usage:**
 ```bash

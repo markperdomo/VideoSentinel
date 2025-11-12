@@ -277,10 +277,10 @@ class VideoEncoder:
             # Use 'stats' loglevel to get progress info, or 'info' for verbose mode
             loglevel = 'info' if self.verbose else 'error'
 
-            # Base command
+            # Base command with global options
             cmd = ['ffmpeg', '-loglevel', loglevel, '-stats']
 
-            # Add recovery flags if recovery mode is enabled
+            # Add INPUT recovery flags if recovery mode is enabled (BEFORE -i)
             if self.recovery_mode:
                 # Ignore decoding errors and try to continue
                 cmd.extend(['-err_detect', 'ignore_err'])
@@ -288,17 +288,22 @@ class VideoEncoder:
                 cmd.extend(['-fflags', '+genpts+discardcorrupt+igndts'])
                 # Ignore unknown stream types
                 cmd.extend(['-ignore_unknown'])
+
+                if self.verbose:
+                    tqdm.write("  Recovery mode enabled: using error-tolerant FFmpeg flags")
+
+            # Add input file
+            cmd.extend(['-i', str(input_path)])
+
+            # Add OUTPUT recovery flags (AFTER -i)
+            if self.recovery_mode:
                 # Increase muxing queue size for problematic files
                 cmd.extend(['-max_muxing_queue_size', '1024'])
                 # Set max error rate to 100% (don't fail on errors)
                 cmd.extend(['-max_error_rate', '1.0'])
 
-                if self.verbose:
-                    tqdm.write("  Recovery mode enabled: using error-tolerant FFmpeg flags")
-
-            # Continue with input and encoding parameters
+            # Continue with encoding parameters
             cmd.extend([
-                '-i', str(input_path),
                 '-c:v', ffmpeg_codec,
                 '-preset', preset,
                 '-crf', str(crf),
