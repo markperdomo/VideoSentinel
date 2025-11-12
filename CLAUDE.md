@@ -57,7 +57,7 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode --replace-ori
 # Recursive scan
 python video_sentinel.py /path/to/videos -r --check-specs
 
-# Verbose output
+# Verbose output (shows all FFmpeg output, useful for debugging)
 python video_sentinel.py /path/to/videos -v
 
 # Find duplicates and automatically keep best quality
@@ -486,6 +486,47 @@ When `--recover` is enabled, output validation becomes more lenient:
 2. Use `--recover` only for files that fail standard encoding
 3. Always validate recovered files play correctly before deleting originals
 4. Combine with `--filename-duplicates` to identify and keep best versions
+
+### Verbose Mode for Debugging
+
+The `-v` or `--verbose` flag enables detailed output for debugging encoding issues:
+
+**Normal mode (without `-v`):**
+```
+[1/5] Encoding: video.avi
+  Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
+✓ [1/5] Completed: video.avi (avg 45.2 fps, 1.8x speed)
+```
+- Shows compact inline progress that overwrites the same line
+- Clean, minimal output
+
+**Verbose mode (with `-v`):**
+```
+[1/5] Encoding: video.avi
+  Output: video_reencoded.mp4
+  Command: ffmpeg -loglevel info -stats ...
+  Recovery mode enabled: using error-tolerant FFmpeg flags
+  [all FFmpeg output lines...]
+  frame=1234 fps=45 q=28.0 size=1024kB time=00:01:23.45 bitrate=1234.5kbits/s speed=1.8x
+  [more FFmpeg output...]
+✓ [1/5] Completed: video.avi
+```
+- Shows ALL FFmpeg output line-by-line
+- Each line creates a new line (no overwriting)
+- More detailed but scrolls more
+- Shows recovery mode warnings and errors
+- Useful for diagnosing why encoding fails
+
+**When to use verbose mode:**
+- Debugging encoding failures
+- Understanding what recovery mode is doing
+- Troubleshooting corrupted files
+- Seeing detailed FFmpeg warnings
+
+**When NOT to use verbose mode:**
+- Batch encoding many files (output is too verbose)
+- When you just want to see progress
+- Production/automated scripts
 
 ### Network Queue Mode for Network Storage
 

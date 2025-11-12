@@ -380,29 +380,32 @@ class VideoEncoder:
                     progress = self._parse_ffmpeg_progress(line)
                     if progress:
                         last_progress = progress
-                        # Display progress inline (overwrite same line)
-                        fps = progress.get('fps', '?')
-                        speed = progress.get('speed', '?')
-                        time = progress.get('time', '?')
-                        frame = progress.get('frame', '?')
 
-                        # Create progress message
-                        progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
+                        # Only show inline progress in non-verbose mode
+                        # In verbose mode, FFmpeg already outputs everything
+                        if not self.verbose:
+                            # Display progress inline (overwrite same line)
+                            fps = progress.get('fps', '?')
+                            speed = progress.get('speed', '?')
+                            time = progress.get('time', '?')
+                            frame = progress.get('frame', '?')
 
-                        # Use print with carriage return to overwrite the same line
-                        # Clear line first, then write progress
-                        print(f"\r{progress_msg:<80}", end='', flush=True)
+                            # Create progress message
+                            progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
+
+                            # Use print with carriage return to overwrite the same line
+                            # Clear line first, then write progress
+                            print(f"\r{progress_msg:<80}", end='', flush=True)
                     elif self.verbose and line.strip():
-                        # In verbose mode, show other messages too
-                        # Need to clear the progress line first
-                        print("\r" + " " * 80 + "\r", end='')
+                        # In verbose mode, show ALL ffmpeg output
                         tqdm.write(f"  {line.rstrip()}")
 
                 # Wait for process to complete
                 process.wait()
 
                 # Print newline after progress updates to move to next line
-                if last_progress:
+                # Only needed if we were showing inline progress (non-verbose mode)
+                if last_progress and not self.verbose:
                     print()  # New line after progress
 
                 # Check return code
