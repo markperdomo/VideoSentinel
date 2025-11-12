@@ -238,6 +238,12 @@ def main():
     )
 
     parser.add_argument(
+        '--filename-duplicates',
+        action='store_true',
+        help='Find duplicates by filename only (fast, no perceptual hashing). Matches files with same name ignoring extension and _reencoded/_quicklook suffixes.'
+    )
+
+    parser.add_argument(
         '--fix-quicklook',
         action='store_true',
         help='Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)'
@@ -730,14 +736,22 @@ def main():
                 print()
 
     # Find duplicates
-    if args.find_duplicates:
+    if args.find_duplicates or args.filename_duplicates:
         print("="*80)
         print("DUPLICATE VIDEO DETECTION")
+        if args.filename_duplicates:
+            print("(Method: Filename matching - fast, no perceptual hashing)")
+        else:
+            print("(Method: Perceptual hashing)")
         if args.duplicate_action != 'report':
             print(f"(Action: {args.duplicate_action})")
         print("="*80)
 
-        duplicate_groups = duplicate_detector.find_duplicates(video_files)
+        # Use filename-based detection if requested, otherwise use perceptual hashing
+        if args.filename_duplicates:
+            duplicate_groups = duplicate_detector.find_duplicates_by_filename(video_files)
+        else:
+            duplicate_groups = duplicate_detector.find_duplicates(video_files)
 
         if duplicate_groups:
             print(f"\nFound {len(duplicate_groups)} groups of duplicate videos:\n")

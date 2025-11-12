@@ -276,3 +276,52 @@ class DuplicateDetector:
             return -1
 
         return self._compare_video_hashes(hashes1, hashes2)
+
+    def find_duplicates_by_filename(self, video_paths: List[Path]) -> Dict[str, List[Path]]:
+        """
+        Find duplicate videos based on filename matching (ignoring extension and common suffixes)
+
+        This is useful when:
+        - Original files are broken and can't generate perceptual hashes
+        - You want very fast duplicate detection without video analysis
+        - Files have same name but different extensions (_reencoded, _quicklook, etc.)
+
+        Args:
+            video_paths: List of video file paths
+
+        Returns:
+            Dictionary mapping group IDs to lists of duplicate video paths
+        """
+        # Group videos by normalized filename
+        filename_groups: Dict[str, List[Path]] = defaultdict(list)
+
+        for video_path in video_paths:
+            # Get the base filename without extension
+            stem = video_path.stem
+
+            # Remove common suffixes: _reencoded, _quicklook
+            normalized_name = stem
+            for suffix in ['_reencoded', '_quicklook']:
+                if normalized_name.endswith(suffix):
+                    normalized_name = normalized_name[:-len(suffix)]
+                    break
+
+            # Convert to lowercase for case-insensitive matching
+            normalized_name = normalized_name.lower()
+
+            # Group by normalized name
+            filename_groups[normalized_name].append(video_path)
+
+        # Convert to duplicate groups format (only groups with 2+ files)
+        duplicate_groups: Dict[str, List[Path]] = {}
+        group_id = 0
+
+        for normalized_name, videos in filename_groups.items():
+            if len(videos) > 1:
+                duplicate_groups[f"group_{group_id}"] = videos
+                group_id += 1
+
+        if self.verbose:
+            tqdm.write(f"Found {len(duplicate_groups)} filename-based duplicate groups")
+
+        return duplicate_groups

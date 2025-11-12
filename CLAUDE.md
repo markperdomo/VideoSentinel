@@ -24,6 +24,11 @@ python video_sentinel.py /path/to/videos --check-specs
 # Find duplicates using perceptual hashing
 python video_sentinel.py /path/to/videos --find-duplicates
 
+# Find duplicates by filename only (fast, no perceptual hashing)
+# Matches files with same name ignoring extension and _reencoded/_quicklook suffixes
+# Useful when original files are broken and can't generate perceptual hashes
+python video_sentinel.py /path/to/videos --filename-duplicates
+
 # Check for encoding issues
 python video_sentinel.py /path/to/videos --check-issues
 
@@ -57,6 +62,9 @@ python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action au
 
 # Find duplicates and interactively choose what to keep
 python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action interactive
+
+# Find filename duplicates and auto-keep best (fast, works with broken originals)
+python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best
 
 # Fix QuickLook compatibility (fast remux MKV→MP4, fix HEVC tags)
 python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
@@ -111,12 +119,17 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Determines if videos meet modern specs (HEVC/H.265, AV1, VP9)
 - Finds video files by extension in directories
 
-**duplicate_detector.py** (Perceptual Hash Comparison)
+**duplicate_detector.py** (Perceptual Hash Comparison & Filename Matching)
 - Implements multi-frame perceptual hashing using OpenCV and ImageHash
 - Extracts 10 frames evenly distributed throughout each video
 - Uses `phash` (perceptual hash) with 12x12 hash size for robustness
 - Compares frame-by-frame with threshold of 15 Hamming distance
 - Groups duplicates even if they differ in encoding, quality, or resolution
+- Also provides filename-based duplicate detection (fast alternative)
+  - Normalizes filenames by removing `_reencoded` and `_quicklook` suffixes
+  - Case-insensitive matching
+  - Groups files with same base name regardless of extension
+  - Useful when broken files can't generate perceptual hashes
 
 **encoder.py** (Video Re-encoding)
 - Re-encodes videos to modern codecs (H.264, HEVC, AV1) using `ffmpeg`
@@ -321,6 +334,11 @@ Duplicate quality ranking normalizes bitrate by codec efficiency:
   - Filters files at discovery stage (applies to all operations: check-specs, duplicates, issues, re-encode)
   - More efficient than scanning all files then filtering later
   - Only files matching specified extensions are loaded, analyzed, and processed
+- `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
+  - Matches files with same name ignoring extension and `_reencoded`/`_quicklook` suffixes
+  - Much faster than `--find-duplicates` (no video analysis required)
+  - Useful when original files are broken and can't generate perceptual hashes
+  - Example: groups `video.avi`, `video_reencoded.mp4`, `video.mkv` as duplicates
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
 - `--temp-dir PATH`: Temp directory for queue mode (default: system temp)
