@@ -38,6 +38,9 @@ python video_sentinel.py /path/to/videos --check-issues --deep-scan
 # Re-encode non-compliant videos with smart quality matching
 python video_sentinel.py /path/to/videos --check-specs --re-encode
 
+# Re-encode with error recovery mode (salvage broken/corrupted files)
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover
+
 # Process only specific file types (filters at file discovery - applies to all operations)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
 
@@ -339,6 +342,12 @@ Duplicate quality ranking normalizes bitrate by codec efficiency:
   - Much faster than `--find-duplicates` (no video analysis required)
   - Useful when original files are broken and can't generate perceptual hashes
   - Example: groups `video.avi`, `video_reencoded.mp4`, `video.mkv` as duplicates
+- `--recover`: Enable error recovery mode during re-encoding
+  - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
+  - Flags used: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-max_error_rate 1.0`
+  - Ignores decoding errors, generates missing timestamps, discards corrupted packets
+  - Useful for recovering videos that won't play or fail to encode normally
+  - Combined with `--re-encode` flag
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
 - `--temp-dir PATH`: Temp directory for queue mode (default: system temp)
@@ -413,6 +422,56 @@ python video_sentinel.py /videos --re-encode --replace-original
 - Use Ctrl+C when you need to stop immediately
 
 **Note:** The 'q' key listener works in both standard batch mode and queue mode. In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit.
+
+### Recovering Broken or Corrupted Videos
+
+VideoSentinel can attempt to recover broken videos using FFmpeg's error recovery mode. This is useful when:
+- Original files are corrupted and won't play properly
+- Videos fail to encode with standard settings
+- Files have broken timestamps or missing metadata
+- Perceptual hashing fails because frames can't be extracted
+
+**How error recovery works:**
+
+The `--recover` flag enables FFmpeg's error-tolerant flags:
+- `-err_detect ignore_err`: Ignores decoding errors and continues processing
+- `-fflags +genpts+discardcorrupt+igndts`: Generates missing timestamps, discards corrupted packets, ignores DTS errors
+- `-max_error_rate 1.0`: Allows 100% error rate (doesn't fail on errors)
+- `-max_muxing_queue_size 1024`: Increases buffer for problematic files
+
+**Usage:**
+```bash
+# Re-encode broken files with recovery mode
+python video_sentinel.py /path/to/broken_videos --check-specs --re-encode --recover
+
+# Combine with filename-based duplicates to clean up broken originals
+python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best --recover
+
+# Recover and replace originals
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --replace-original
+
+# Filter to specific broken file types
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --file-types avi,wmv
+```
+
+**What recovery mode can fix:**
+- ✓ Videos with corrupted frames (skips bad frames)
+- ✓ Files with broken timestamps (regenerates them)
+- ✓ Videos missing metadata
+- ✓ Files that crash standard ffmpeg encoding
+- ✓ Partially downloaded or incomplete files
+
+**Limitations:**
+- Cannot recover completely unreadable files (0 bytes, wrong format, etc.)
+- May result in shorter duration if large portions are corrupted
+- Audio sync issues if significant corruption
+- Quality depends on how much of the file is recoverable
+
+**Best practices:**
+1. Try standard encoding first (`--re-encode` without `--recover`)
+2. Use `--recover` only for files that fail standard encoding
+3. Always validate recovered files play correctly before deleting originals
+4. Combine with `--filename-duplicates` to identify and keep best versions
 
 ### Network Queue Mode for Network Storage
 

@@ -38,8 +38,9 @@ class VideoEncoder:
         'veryslow': 'veryslow'
     }
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, recovery_mode: bool = False):
         self.verbose = verbose
+        self.recovery_mode = recovery_mode
 
     def _parse_ffmpeg_progress(self, line: str) -> Optional[Dict[str, str]]:
         """
@@ -275,10 +276,28 @@ class VideoEncoder:
             # Build ffmpeg command
             # Use 'stats' loglevel to get progress info, or 'info' for verbose mode
             loglevel = 'info' if self.verbose else 'error'
-            cmd = [
-                'ffmpeg',
-                '-loglevel', loglevel,
-                '-stats',  # Enable progress stats
+
+            # Base command
+            cmd = ['ffmpeg', '-loglevel', loglevel, '-stats']
+
+            # Add recovery flags if recovery mode is enabled
+            if self.recovery_mode:
+                # Ignore decoding errors and try to continue
+                cmd.extend(['-err_detect', 'ignore_err'])
+                # Generate presentation timestamps and discard corrupted packets
+                cmd.extend(['-fflags', '+genpts+discardcorrupt+igndts'])
+                # Ignore unknown stream types
+                cmd.extend(['-ignore_unknown'])
+                # Increase muxing queue size for problematic files
+                cmd.extend(['-max_muxing_queue_size', '1024'])
+                # Set max error rate to 100% (don't fail on errors)
+                cmd.extend(['-max_error_rate', '1.0'])
+
+                if self.verbose:
+                    tqdm.write("  Recovery mode enabled: using error-tolerant FFmpeg flags")
+
+            # Continue with input and encoding parameters
+            cmd.extend([
                 '-i', str(input_path),
                 '-c:v', ffmpeg_codec,
                 '-preset', preset,
@@ -286,7 +305,7 @@ class VideoEncoder:
                 '-c:a', audio_codec,
                 '-y',  # Overwrite output file if exists
                 str(output_path)
-            ]
+            ])
 
             # Add codec-specific parameters
             if target_codec.lower() == 'hevc':

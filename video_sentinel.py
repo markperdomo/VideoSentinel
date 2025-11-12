@@ -275,6 +275,12 @@ def main():
     )
 
     parser.add_argument(
+        '--recover',
+        action='store_true',
+        help='Enable error recovery mode when re-encoding. Uses FFmpeg flags to ignore errors, generate missing timestamps, and salvage corrupted/broken videos. Useful for recovering broken files.'
+    )
+
+    parser.add_argument(
         '--target-codec',
         default='hevc',
         choices=['h264', 'hevc', 'av1'],
@@ -400,7 +406,7 @@ def main():
         args.check_issues = True
 
     # Check ffmpeg availability
-    encoder = VideoEncoder(verbose=args.verbose)
+    encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover)
     if not encoder.check_ffmpeg_available():
         print("Error: ffmpeg is not installed or not in PATH", file=sys.stderr)
         print("Please install ffmpeg to use VideoSentinel", file=sys.stderr)
@@ -485,6 +491,8 @@ def main():
             print("="*80)
             print("RE-ENCODING NON-COMPLIANT VIDEOS")
             print("(Using smart quality matching to preserve visual quality)")
+            if args.recover:
+                print("🛠️  RECOVERY MODE: Using error-tolerant FFmpeg flags to salvage broken files")
             if args.replace_original:
                 print("⚠️  REPLACE MODE: Original files will be deleted and replaced")
             print()
