@@ -770,6 +770,8 @@ def main():
 
             all_to_delete = []
             all_to_keep = []
+            # Map deleted files to their corresponding kept file for space calculation
+            delete_to_keep_map = {}
 
             if args.duplicate_action == 'report':
                 # Just report duplicates, no action
@@ -793,6 +795,9 @@ def main():
                     all_to_delete.extend(to_delete)
                     if to_keep:
                         all_to_keep.append(to_keep)
+                        # Map each deleted file to its kept file
+                        for deleted_file in to_delete:
+                            delete_to_keep_map[deleted_file] = to_keep
                     print()
 
                 # Perform deletions if any
@@ -808,40 +813,68 @@ def main():
                         if confirm == 'yes':
                             deleted_count = 0
                             total_size_freed = 0
+                            incremental_space_saved = 0
 
                             for video in all_to_delete:
                                 try:
-                                    size = video.stat().st_size
+                                    deleted_size = video.stat().st_size
                                     video.unlink()
                                     deleted_count += 1
-                                    total_size_freed += size
+                                    total_size_freed += deleted_size
+
+                                    # Calculate incremental space saved (deleted - kept)
+                                    if video in delete_to_keep_map:
+                                        kept_file = delete_to_keep_map[video]
+                                        if kept_file.exists():
+                                            kept_size = kept_file.stat().st_size
+                                            incremental_space_saved += max(0, deleted_size - kept_size)
+                                        else:
+                                            incremental_space_saved += deleted_size
+                                    else:
+                                        incremental_space_saved += deleted_size
+
                                     print(f"  {Colors.green('✓')} Deleted: {video.name}")
                                 except Exception as e:
                                     print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
 
                             print()
                             print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                            print(f"Space freed: {total_size_freed / (1024*1024):.2f} MB")
+                            print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                            print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
                         else:
                             print(f"{Colors.yellow('→ Deletion cancelled')}")
                     else:
                         # Interactive mode - already got confirmation per group, delete now
                         deleted_count = 0
                         total_size_freed = 0
+                        incremental_space_saved = 0
 
                         for video in all_to_delete:
                             try:
-                                size = video.stat().st_size
+                                deleted_size = video.stat().st_size
                                 video.unlink()
                                 deleted_count += 1
-                                total_size_freed += size
+                                total_size_freed += deleted_size
+
+                                # Calculate incremental space saved (deleted - kept)
+                                if video in delete_to_keep_map:
+                                    kept_file = delete_to_keep_map[video]
+                                    if kept_file.exists():
+                                        kept_size = kept_file.stat().st_size
+                                        incremental_space_saved += max(0, deleted_size - kept_size)
+                                    else:
+                                        incremental_space_saved += deleted_size
+                                else:
+                                    incremental_space_saved += deleted_size
+
                                 print(f"  {Colors.green('✓')} Deleted: {video.name}")
                             except Exception as e:
                                 print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
 
                         print()
                         print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                        print(f"Space freed: {total_size_freed / (1024*1024):.2f} MB")
+                        print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                        print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
                     print()
 
                     # Clean up filenames of kept files (remove _reencoded and _quicklook suffixes)
