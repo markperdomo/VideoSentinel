@@ -368,40 +368,66 @@ class VideoEncoder:
                 error_output = []
 
                 # Read stderr line by line (FFmpeg writes progress to stderr)
-                while True:
-                    line = process.stderr.readline()
-                    if not line:
-                        break
+                try:
+                    while True:
+                        # Check for shutdown request
+                        if shutdown_requested():
+                            if self.verbose:
+                                tqdm.write("  Shutdown requested, terminating encoding...")
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait()
+                            return False
 
-                    # Store for error reporting
-                    error_output.append(line)
+                        line = process.stderr.readline()
+                        if not line:
+                            break
 
-                    # Parse progress info
-                    progress = self._parse_ffmpeg_progress(line)
-                    if progress:
-                        last_progress = progress
+                        # Store for error reporting
+                        error_output.append(line)
 
-                        # Only show inline progress in non-verbose mode
-                        # In verbose mode, FFmpeg already outputs everything
-                        if not self.verbose:
-                            # Display progress inline (overwrite same line)
-                            fps = progress.get('fps', '?')
-                            speed = progress.get('speed', '?')
-                            time = progress.get('time', '?')
-                            frame = progress.get('frame', '?')
+                        # Parse progress info
+                        progress = self._parse_ffmpeg_progress(line)
+                        if progress:
+                            last_progress = progress
 
-                            # Create progress message
-                            progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
+                            # Only show inline progress in non-verbose mode
+                            # In verbose mode, FFmpeg already outputs everything
+                            if not self.verbose:
+                                # Display progress inline (overwrite same line)
+                                fps = progress.get('fps', '?')
+                                speed = progress.get('speed', '?')
+                                time = progress.get('time', '?')
+                                frame = progress.get('frame', '?')
 
-                            # Use print with carriage return to overwrite the same line
-                            # Clear line first, then write progress
-                            print(f"\r{progress_msg:<80}", end='', flush=True)
-                    elif self.verbose and line.strip():
-                        # In verbose mode, show ALL ffmpeg output
-                        tqdm.write(f"  {line.rstrip()}")
+                                # Create progress message
+                                progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
 
-                # Wait for process to complete
-                process.wait()
+                                # Use print with carriage return to overwrite the same line
+                                # Clear line first, then write progress
+                                print(f"\r{progress_msg:<80}", end='', flush=True)
+                        elif self.verbose and line.strip():
+                            # In verbose mode, show ALL ffmpeg output
+                            tqdm.write(f"  {line.rstrip()}")
+
+                    # Wait for process to complete
+                    process.wait()
+
+                except KeyboardInterrupt:
+                    # User pressed Ctrl+C, terminate FFmpeg gracefully
+                    if self.verbose:
+                        tqdm.write("  Interrupted, terminating encoding...")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    # Re-raise to allow upper levels to handle
+                    raise
 
                 # Clear the progress line before printing completion message
                 # Only needed if we were showing inline progress (non-verbose mode)

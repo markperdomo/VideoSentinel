@@ -648,6 +648,16 @@ def main():
                             video_infos=video_infos_dict,
                             replace_original=args.replace_original
                         )
+                    except KeyboardInterrupt:
+                        print()
+                        print("="*80)
+                        print("INTERRUPTED - Stopping after current video")
+                        print("="*80)
+                        stop_shutdown_listener()
+                        print()
+                        print("You can safely resume by running the same command again.")
+                        print()
+                        sys.exit(0)
                     finally:
                         # Stop shutdown listener when batch encoding completes
                         stop_shutdown_listener()
