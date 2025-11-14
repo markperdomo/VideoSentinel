@@ -529,6 +529,8 @@ def main():
             if not videos_needing_encode:
                 print("No videos need encoding.")
                 print()
+                # Stop shutdown listener since we're not encoding anything
+                stop_shutdown_listener()
             else:
                 videos_to_encode = [v[0] for v in videos_needing_encode]
                 video_infos_dict = {v[0]: v[1] for v in videos_needing_encode}
