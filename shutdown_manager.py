@@ -95,6 +95,16 @@ class ShutdownManager:
             self._listen_for_shutdown_blocking()
             return
 
+        # Check if running in tmux or screen (causes issues with raw mode)
+        import os
+        in_tmux = os.environ.get('TMUX') is not None
+        in_screen = os.environ.get('STY') is not None
+
+        if in_tmux or in_screen:
+            # In tmux/screen, don't use terminal manipulation at all
+            # Just silently disable the listener to avoid breaking the terminal
+            return
+
         # Unix/Linux/macOS - use select for better responsiveness
         try:
             import termios
@@ -105,8 +115,9 @@ class ShutdownManager:
             old_settings = termios.tcgetattr(fd)
 
             try:
-                # Set terminal to raw mode for immediate key detection
-                tty.setraw(fd)
+                # Use cbreak mode instead of raw mode
+                # Cbreak allows Ctrl+C to work but gives immediate key detection
+                tty.setcbreak(fd)
 
                 while not self._stop_listener:
                     # Check if there's input available (100ms timeout)
@@ -129,7 +140,7 @@ class ShutdownManager:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
         except Exception as e:
-            # Fall back to blocking input if raw mode fails
+            # Fall back to blocking input if cbreak mode fails
             # (e.g., in some terminals or when stdin is redirected)
             pass
 

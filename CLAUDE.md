@@ -422,7 +422,10 @@ python video_sentinel.py /videos --re-encode --replace-original
 - Use `q` when you want to stop cleanly after the current video completes
 - Use Ctrl+C when you need to stop immediately
 
-**Note:** The 'q' key listener works in both standard batch mode and queue mode. In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit.
+**Important notes:**
+- The 'q' key listener works in both standard batch mode and queue mode
+- In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit
+- **tmux/screen users**: The 'q' key listener is automatically disabled when running inside tmux or screen to avoid terminal compatibility issues. Use Ctrl+C instead for graceful interruption.
 
 ### Recovering Broken or Corrupted Videos
 
