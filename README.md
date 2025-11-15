@@ -154,6 +154,20 @@ Choose target codec:
 python video_sentinel.py /path/to/videos --re-encode --target-codec hevc
 ```
 
+Downscale 4K/high-resolution videos to 1080p:
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p
+```
+
+Combine downscaling with other options:
+```bash
+# Downscale, use specific codec, and replace originals
+python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --target-codec hevc --replace-original
+
+# Downscale with queue mode for network storage
+python video_sentinel.py /Volumes/NAS/videos --check-specs --re-encode --downscale-1080p --queue-mode
+```
+
 ### Error Recovery Mode
 
 VideoSentinel can attempt to recover and re-encode broken or corrupted videos using FFmpeg's error-tolerant mode. This is useful when:
@@ -501,6 +515,7 @@ python video_sentinel.py /videos --re-encode --replace-original
 - `--target-codec {h264,hevc,av1}`: Target codec for re-encoding (default: hevc)
 - `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
 - `--recover`: Enable error recovery mode for broken/corrupted videos
+- `--downscale-1080p`: Downscale videos larger than 1080p to maximum 1920x1080 (preserves aspect ratio)
 - `--output-dir PATH`: Output directory for re-encoded videos
 
 **Duplicate Detection Options:**
@@ -550,6 +565,11 @@ python video_sentinel.py ~/Videos -r --check-issues --deep-scan
 Recover broken videos with error-tolerant encoding:
 ```bash
 python video_sentinel.py ~/Videos --check-specs --re-encode --recover --file-types avi,wmv
+```
+
+Downscale 4K videos to 1080p for space savings:
+```bash
+python video_sentinel.py ~/Videos -r --check-specs --re-encode --downscale-1080p --replace-original
 ```
 
 Find duplicates by filename and auto-keep best (fast, works with broken originals):

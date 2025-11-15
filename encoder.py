@@ -38,9 +38,10 @@ class VideoEncoder:
         'veryslow': 'veryslow'
     }
 
-    def __init__(self, verbose: bool = False, recovery_mode: bool = False):
+    def __init__(self, verbose: bool = False, recovery_mode: bool = False, downscale_1080p: bool = False):
         self.verbose = verbose
         self.recovery_mode = recovery_mode
+        self.downscale_1080p = downscale_1080p
 
     def _parse_time_to_seconds(self, time_str: str) -> float:
         """
@@ -369,6 +370,21 @@ class VideoEncoder:
                 '-y',  # Overwrite output file if exists
                 str(output_path)
             ])
+
+            # Add downscaling filter if requested and video is larger than 1080p
+            if self.downscale_1080p and video_info:
+                # Check if video is larger than 1080p (either dimension exceeds 1920x1080)
+                if video_info.width > 1920 or video_info.height > 1080:
+                    # Insert scale filter before output path
+                    # scale=1920:1080:force_original_aspect_ratio=decrease ensures:
+                    # - Video fits within 1920x1080 box
+                    # - Aspect ratio is preserved
+                    # - Video is only scaled down, never up
+                    cmd.insert(-1, '-vf')
+                    cmd.insert(-1, 'scale=1920:1080:force_original_aspect_ratio=decrease')
+
+                    if self.verbose:
+                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080")
 
             # Add codec-specific parameters
             if target_codec.lower() == 'hevc':

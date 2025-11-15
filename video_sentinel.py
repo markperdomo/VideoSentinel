@@ -323,6 +323,12 @@ def main():
     )
 
     parser.add_argument(
+        '--downscale-1080p',
+        action='store_true',
+        help='Downscale videos larger than 1080p to a maximum of 1920x1080 while preserving aspect ratio. Useful for reducing file size and ensuring compatibility.'
+    )
+
+    parser.add_argument(
         '--target-codec',
         default='hevc',
         choices=['h264', 'hevc', 'av1'],
@@ -448,7 +454,7 @@ def main():
         args.check_issues = True
 
     # Check ffmpeg availability
-    encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover)
+    encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover, downscale_1080p=args.downscale_1080p)
     if not encoder.check_ffmpeg_available():
         print("Error: ffmpeg is not installed or not in PATH", file=sys.stderr)
         print("Please install ffmpeg to use VideoSentinel", file=sys.stderr)

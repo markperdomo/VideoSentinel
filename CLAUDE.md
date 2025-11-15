@@ -41,6 +41,12 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode
 # Re-encode with error recovery mode (salvage broken/corrupted files)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --recover
 
+# Downscale videos larger than 1080p to maximum 1920x1080 (preserves aspect ratio)
+python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p
+
+# Downscale 4K videos and replace originals (great for space savings)
+python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original
+
 # Process only specific file types (filters at file discovery - applies to all operations)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
 
@@ -382,6 +388,14 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - Output flags (after `-i`): `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
   - Ignores decoding errors, generates missing timestamps, discards corrupted packets
   - Useful for recovering videos that won't play or fail to encode normally
+  - Combined with `--re-encode` flag
+- `--downscale-1080p`: Downscale videos larger than 1080p during re-encoding
+  - Limits maximum resolution to 1920x1080 while preserving aspect ratio
+  - Uses FFmpeg scale filter: `scale=1920:1080:force_original_aspect_ratio=decrease`
+  - Only scales down, never upscales (videos ≤1080p are unchanged)
+  - Automatically handles different aspect ratios (16:9, 21:9, 4:3, etc.)
+  - Useful for reducing file size and storage requirements
+  - Example: 3840x2160 (4K) → 1920x1080, 2560×1440 (1440p) → 1920x1080, 2560×1080 (ultrawide) → fit within 1920x1080
   - Combined with `--re-encode` flag
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
