@@ -30,7 +30,7 @@ A Python command-line utility for managing and validating video libraries. Ensur
 - **Smart Resume Support**: Interrupt and resume batch jobs without losing progress (Ctrl+C safe)
 - **Graceful Shutdown**: Press 'q' to finish current video and exit cleanly
 - **Error Recovery Mode**: Salvage broken/corrupted videos using FFmpeg's error-tolerant encoding
-- **Real-Time Progress**: Live encoding statistics with queue position, fps, speed multiplier
+- **Visual Progress Bar**: Live encoding progress with percentage, speed multiplier, and ETA
 - **File Type Filtering**: Target specific legacy formats (wmv, avi, mov) for selective processing
 - **Verbose Debug Mode**: Detailed FFmpeg output for troubleshooting encoding issues
 
@@ -605,19 +605,20 @@ Uses higher CRF values (20-32 range) since AV1 has superior compression efficien
 
 ### Real-Time Encoding Progress
 
-During batch encoding, VideoSentinel displays live progress information with queue position and encoding statistics:
+During batch encoding, VideoSentinel displays a **visual progress bar** with queue position, percentage, speed, and ETA:
 
 **Progress display format:**
 ```
-[1/5] Encoding: video.wmv - frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
+[1/5] Encoding: video.wmv
+  [████████████████████░░░░░] 80.0% | 5.58x speed | ETA: 2m 15s
 ```
 
 **What it shows:**
 - **Queue position:** `[1/5]` = encoding video 1 of 5
-- **Current frame:** Number of frames encoded so far
-- **Encoding speed:** Frames per second (fps) being processed
-- **Time position:** Current position in the video being encoded
-- **Speed multiplier:** How fast encoding is compared to real-time (1.8x = encoding 1.8× faster than playback)
+- **Visual progress bar:** 25-character bar showing completion at a glance
+- **Percentage:** Exact completion percentage (e.g., 80.0%)
+- **Speed multiplier:** How fast encoding is compared to real-time (5.58x = encoding 5.58× faster than playback)
+- **ETA:** Estimated time until completion (e.g., "2m 15s", "1h 5m")
 
 **Completion messages:**
 ```
@@ -625,11 +626,14 @@ During batch encoding, VideoSentinel displays live progress information with que
 ✗ [1/5] Error encoding video.wmv: validation failed
 ```
 
-This helps you:
-- Track progress in large batch operations
-- Estimate remaining time
-- Identify slow-encoding videos
-- Monitor encoding efficiency
+**Benefits:**
+- **Visual at a glance:** Progress bar shows completion instantly
+- **Accurate ETA:** Know exactly when encoding will finish
+- **Percentage precision:** See exact progress numerically
+- **Encoding efficiency:** Speed multiplier shows how fast your hardware is
+- **No mental math:** ETA calculated automatically from speed and remaining duration
+
+**Note:** If video duration is unavailable, falls back to time-based display: `Encoding: 00:01:23.45 | 5.58x speed`
 
 ### Example
 
@@ -1316,10 +1320,11 @@ The `-v` or `--verbose` flag enables detailed output for debugging encoding issu
 **Normal mode (without `-v`):**
 ```
 [1/5] Encoding: video.avi
-  Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
+  [████████████████████░░░░░] 80.0% | 5.58x speed | ETA: 2m 15s
 ✓ [1/5] Completed: video.avi (avg 45.2 fps, 1.8x speed)
 ```
-- Shows compact inline progress that overwrites the same line
+- Shows visual progress bar with percentage, speed, and ETA
+- Compact inline progress that overwrites the same line
 - Clean, minimal output
 
 **Verbose mode (with `-v`):**

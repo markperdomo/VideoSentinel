@@ -230,15 +230,24 @@ If the process is interrupted, the encoder intelligently resumes:
 5. Never re-encodes files that are already successfully encoded
 6. Validates outputs before considering them complete to avoid using corrupted partial files
 
-**Real-Time Encoding Progress** (encoder.py:43-87, 296-390)
-During video encoding, the encoder displays live progress information with queue position:
+**Real-Time Encoding Progress** (encoder.py:45-147, 455-490)
+During video encoding, the encoder displays live visual progress with queue position:
 1. Shows position in batch: `[1/5] Encoding: video.wmv`
 2. Parses FFmpeg's stderr output in real-time using regex patterns
 3. Extracts key metrics: frame count, fps (encoding speed), time position, speed multiplier
-4. Displays progress inline with carriage returns (overwrites same line)
-5. Shows final stats: `✓ [1/5] Completed: video.wmv (avg 45.2 fps, 1.8x speed)`
-6. Format: `Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x`
-7. Error messages also include position: `✗ [1/5] Error encoding video.wmv`
+4. Calculates percentage based on current time vs total video duration
+5. Displays visual progress bar with percentage, speed, and ETA
+6. Format: `[████████████████████░░░░░] 80.0% | 5.58x speed | ETA: 2m 15s`
+7. Updates inline with carriage returns (overwrites same line)
+8. Shows final stats: `✓ [1/5] Completed: video.wmv (avg 45.2 fps, 1.8x speed)`
+9. Error messages also include position: `✗ [1/5] Error encoding video.wmv`
+
+**Progress Bar Features:**
+- Visual bar (25 chars wide) using █ (filled) and ░ (empty) characters
+- Percentage shows exact completion (e.g., 80.0%)
+- Speed multiplier shows encoding efficiency (e.g., 5.58x = encoding 5.58× faster than real-time)
+- ETA calculated from remaining duration and current speed (e.g., "2m 15s", "1h 5m")
+- Automatically falls back to time-based display if video duration unavailable
 
 **Graceful Shutdown Manager** (shutdown_manager.py)
 Provides thread-safe graceful shutdown during batch encoding operations:

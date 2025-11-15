@@ -42,6 +42,64 @@ class VideoEncoder:
         self.verbose = verbose
         self.recovery_mode = recovery_mode
 
+    def _parse_time_to_seconds(self, time_str: str) -> float:
+        """
+        Parse FFmpeg time string to seconds
+
+        Args:
+            time_str: Time string in format "HH:MM:SS.ms"
+
+        Returns:
+            Time in seconds as float
+        """
+        try:
+            parts = time_str.split(':')
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = float(parts[2])
+            return hours * 3600 + minutes * 60 + seconds
+        except:
+            return 0.0
+
+    def _format_eta(self, seconds: float) -> str:
+        """
+        Format ETA in human-readable format
+
+        Args:
+            seconds: Remaining time in seconds
+
+        Returns:
+            Formatted string like "2m 30s" or "1h 5m"
+        """
+        if seconds <= 0:
+            return "0s"
+
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        elif minutes > 0:
+            return f"{minutes}m {secs}s"
+        else:
+            return f"{secs}s"
+
+    def _create_progress_bar(self, percentage: float, width: int = 30) -> str:
+        """
+        Create a visual progress bar
+
+        Args:
+            percentage: Progress percentage (0-100)
+            width: Width of the progress bar in characters
+
+        Returns:
+            Progress bar string like "[████████░░░░░░]"
+        """
+        filled = int(width * percentage / 100)
+        empty = width - filled
+        return f"[{'█' * filled}{'░' * empty}]"
+
     def _parse_ffmpeg_progress(self, line: str) -> Optional[Dict[str, str]]:
         """
         Parse FFmpeg progress output line
@@ -398,17 +456,35 @@ class VideoEncoder:
                             # In verbose mode, FFmpeg already outputs everything
                             if not self.verbose:
                                 # Display progress inline (overwrite same line)
-                                fps = progress.get('fps', '?')
                                 speed = progress.get('speed', '?')
-                                time = progress.get('time', '?')
-                                frame = progress.get('frame', '?')
+                                time_str = progress.get('time', '0:0:0')
 
-                                # Create progress message
-                                progress_msg = f"  Encoding: frame={frame} fps={fps} time={time} speed={speed}x"
+                                # Calculate percentage and ETA if we have duration
+                                if video_info and video_info.duration > 0:
+                                    current_seconds = self._parse_time_to_seconds(time_str)
+                                    total_seconds = video_info.duration
+                                    percentage = min(100.0, (current_seconds / total_seconds) * 100)
+
+                                    # Calculate ETA if we have speed
+                                    eta_str = ""
+                                    try:
+                                        speed_float = float(speed) if speed != '?' else 0
+                                        if speed_float > 0:
+                                            remaining_seconds = (total_seconds - current_seconds) / speed_float
+                                            eta_str = f" | ETA: {self._format_eta(remaining_seconds)}"
+                                    except:
+                                        pass
+
+                                    # Create progress bar with percentage
+                                    progress_bar = self._create_progress_bar(percentage, width=25)
+                                    progress_msg = f"  {progress_bar} {percentage:5.1f}% | {speed}x speed{eta_str}"
+                                else:
+                                    # Fallback to time-based display if no duration
+                                    progress_msg = f"  Encoding: {time_str} | {speed}x speed"
 
                                 # Use print with carriage return to overwrite the same line
                                 # Clear line first, then write progress
-                                print(f"\r{progress_msg:<80}", end='', flush=True)
+                                print(f"\r{progress_msg:<100}", end='', flush=True)
                         elif self.verbose and line.strip():
                             # In verbose mode, show ALL ffmpeg output
                             tqdm.write(f"  {line.rstrip()}")
