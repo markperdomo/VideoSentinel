@@ -4,19 +4,35 @@ A Python command-line utility for managing and validating video libraries. Ensur
 
 ## Features
 
-- **Encoding Validation**: Check if videos meet modern encoding standards (H.265/HEVC by default)
-- **Advanced Duplicate Detection**: Find duplicate videos using multi-frame perceptual hashing (detects similar content even with different encoding, resolution, or quality)
-- **Intelligent Duplicate Management**: Automatically keep best quality or interactively choose which duplicates to delete
-- **QuickLook Compatibility Fixer**: Automatically fix macOS QuickLook issues - fast remux MKV→MP4, fix HEVC tags, ensure proper pixel format
-- **Network Queue Mode**: Optimized pipeline for encoding files stored on network drives - downloads to local temp storage, encodes fast, then uploads back
-- **Issue Detection**: Identify corrupted files, incomplete videos, and encoding problems
-- **Smart Re-encoding**: Automatically re-encode videos to modern specifications with intelligent quality matching based on source bitrate
+### Core Capabilities
+- **Encoding Validation**: Check if videos meet modern encoding standards (H.265/HEVC, AV1, VP9)
+- **Smart Re-encoding**: Automatically re-encode videos with intelligent quality matching based on source bitrate
+- **40+ Video Format Support**: Works with virtually all video formats (MP4, MKV, AVI, WMV, FLV, MOV, 3GP, VOB, TS, and many more)
+- **Issue Detection**: Identify corrupted files, incomplete videos, and encoding problems (quick or deep scan)
 - **Replace Original Mode**: Safely replace original files with re-encoded versions after thorough validation
-- **Smart Resume Support**: Interrupt and resume batch encoding jobs without losing progress
-- **Real-Time Progress**: Live encoding statistics with queue position, fps, speed multiplier, and time position
-- **File Type Filtering**: Target specific legacy formats (wmv, avi, mov) for selective re-encoding
-- **macOS QuickLook Compatible**: All outputs optimized for instant preview in macOS Finder
-- **Flexible CLI**: Multiple operation modes with configurable options
+
+### Duplicate Management
+- **Advanced Duplicate Detection**: Multi-frame perceptual hashing detects similar content even with different encoding, resolution, or quality
+- **Filename-Based Duplicates**: Fast duplicate detection by filename only (useful when originals are broken)
+- **Intelligent Duplicate Management**: Automatically keep best quality or interactively choose which duplicates to delete
+- **Codec-Aware Quality Ranking**: Properly ranks modern codecs (HEVC @ 3000 kbps beats H.264 @ 6000 kbps)
+
+### macOS QuickLook Optimization
+- **QuickLook Compatibility Fixer**: Automatically fix preview issues - fast remux MKV→MP4, fix HEVC tags
+- **Universal Compatibility**: All outputs optimized for instant preview in macOS Finder and Apple devices
+
+### Network Storage & Performance
+- **Network Queue Mode**: 2-3× faster encoding on network drives via download→encode→upload pipeline
+- **Smart Buffering**: Parallel download, encoding, and upload operations
+- **Queue Monitoring**: Built-in monitoring script to track queue progress and status
+
+### Reliability & Safety
+- **Smart Resume Support**: Interrupt and resume batch jobs without losing progress (Ctrl+C safe)
+- **Graceful Shutdown**: Press 'q' to finish current video and exit cleanly
+- **Error Recovery Mode**: Salvage broken/corrupted videos using FFmpeg's error-tolerant encoding
+- **Real-Time Progress**: Live encoding statistics with queue position, fps, speed multiplier
+- **File Type Filtering**: Target specific legacy formats (wmv, avi, mov) for selective processing
+- **Verbose Debug Mode**: Detailed FFmpeg output for troubleshooting encoding issues
 
 ## Table of Contents
 
@@ -26,8 +42,10 @@ A Python command-line utility for managing and validating video libraries. Ensur
   - [Basic Usage](#basic-usage)
   - [Specific Operations](#specific-operations)
   - [Re-encoding](#re-encoding)
+  - [Error Recovery Mode](#error-recovery-mode)
   - [Fixing QuickLook Compatibility](#fixing-quicklook-compatibility)
   - [Network Queue Mode](#network-queue-mode)
+  - [Graceful Shutdown](#graceful-shutdown)
   - [Additional Options](#additional-options)
 - [Examples](#examples)
 - [Modern Encoding Specs](#modern-encoding-specs)
@@ -38,7 +56,9 @@ A Python command-line utility for managing and validating video libraries. Ensur
   - [Interrupting and Resuming Batch Jobs](#interrupting-and-resuming-batch-jobs)
 - [Advanced Duplicate Detection](#advanced-duplicate-detection)
   - [Managing Duplicates](#managing-duplicates)
+  - [Filename-Based Duplicates](#filename-based-duplicates)
 - [How Broken Video Detection Works](#how-broken-video-detection-works)
+- [Debugging with Verbose Mode](#debugging-with-verbose-mode)
 - [License](#license)
 
 ## Requirements
@@ -87,14 +107,24 @@ Check encoding specifications only:
 python video_sentinel.py /path/to/videos --check-specs
 ```
 
-Find duplicate videos:
+Find duplicate videos (perceptual hashing):
 ```bash
 python video_sentinel.py /path/to/videos --find-duplicates
+```
+
+Find duplicates by filename only (fast, works with broken files):
+```bash
+python video_sentinel.py /path/to/videos --filename-duplicates
 ```
 
 Check for encoding issues:
 ```bash
 python video_sentinel.py /path/to/videos --check-issues
+```
+
+Deep scan for corrupted videos:
+```bash
+python video_sentinel.py /path/to/videos --check-issues --deep-scan
 ```
 
 ### Re-encoding
@@ -123,6 +153,62 @@ Choose target codec:
 ```bash
 python video_sentinel.py /path/to/videos --re-encode --target-codec hevc
 ```
+
+### Error Recovery Mode
+
+VideoSentinel can attempt to recover and re-encode broken or corrupted videos using FFmpeg's error-tolerant mode. This is useful when:
+- Original files are corrupted and won't play properly
+- Videos fail to encode with standard settings
+- Files have broken timestamps or missing metadata
+- Perceptual hashing fails because frames can't be extracted
+
+**Enable recovery mode:**
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover
+```
+
+**How it works:**
+
+The `--recover` flag enables FFmpeg's error-tolerant flags to salvage broken files:
+
+**Input options** (before `-i`):
+- `-err_detect ignore_err` - Ignores decoding errors and continues processing
+- `-fflags +genpts+discardcorrupt+igndts` - Generates missing timestamps, discards corrupted packets
+- `-ignore_unknown` - Ignores unknown stream types
+
+**Output options** (after `-i`):
+- `-max_muxing_queue_size 1024` - Increases buffer for problematic files
+- `-max_error_rate 1.0` - Allows 100% error rate (doesn't fail on errors)
+
+**What recovery mode can fix:**
+- ✓ Videos with corrupted frames (skips bad frames)
+- ✓ Files with broken timestamps (regenerates them)
+- ✓ Videos missing metadata
+- ✓ Files that crash standard ffmpeg encoding
+- ✓ Partially downloaded or incomplete files
+
+**Combine with filename duplicates to clean up broken originals:**
+```bash
+python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best
+```
+
+**Recover and replace originals:**
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --replace-original
+```
+
+**Filter to specific broken file types:**
+```bash
+python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --file-types avi,wmv
+```
+
+**Limitations:**
+- Cannot recover completely unreadable files (0 bytes, wrong format)
+- May result in shorter duration if large portions are corrupted
+- Audio sync issues possible if significant corruption
+- Quality depends on how much of the file is recoverable
+
+**Validation:** When `--recover` is enabled, output validation is more lenient to avoid rejecting successfully recovered files that may have different durations or missing metadata.
 
 ### Fixing QuickLook Compatibility
 
@@ -328,16 +414,88 @@ python video_sentinel.py /Volumes/NAS/videos --queue-mode --re-encode
 # - Completes any partial operations
 ```
 
+**Monitoring queue status:**
+
+VideoSentinel includes a monitoring script to track queue progress:
+
+```bash
+# View queue status and progress
+python monitor_queue.py
+
+# Monitor queue with custom temp dir
+python monitor_queue.py --temp-dir /Users/you/temp
+
+# Show all files including completed
+python monitor_queue.py --all
+
+# Show only failed files
+python monitor_queue.py --failed-only
+```
+
+The monitor shows:
+- Queue summary (pending, downloading, encoding, uploading, complete, failed counts)
+- Progress percentage
+- Failed files with error messages
+- Temp directory size and contents
+- Detailed file-by-file status
+
+### Graceful Shutdown
+
+For controlled shutdown during batch encoding, VideoSentinel supports graceful shutdown by pressing the **'q' key**:
+
+**How it works:**
+- Press the `q` key at any time during encoding
+- VideoSentinel will finish the current video, then stop
+- Progress is saved automatically (same as Ctrl+C)
+- Next run will resume from where you left off
+
+**Usage:**
+```bash
+# Start batch encoding
+python video_sentinel.py /videos --re-encode --replace-original
+
+# During encoding, press 'q' to stop gracefully
+# The current video will finish encoding, then the process stops
+```
+
+**Key differences from Ctrl+C:**
+- **Ctrl+C**: Immediate interrupt (may stop mid-encode, but safe due to validation)
+- **'q' key**: Graceful shutdown (finishes current video first)
+- Both are safe and support resume
+
+**When to use:**
+- Use `q` when you want to stop cleanly after the current video completes
+- Use Ctrl+C when you need to stop immediately
+
+**Important notes:**
+- The 'q' key listener works in both standard batch mode and queue mode
+- In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit
+- **tmux/screen users**: The 'q' key listener is automatically disabled when running inside tmux or screen to avoid terminal compatibility issues. Use Ctrl+C instead for graceful interruption.
+
 ### Additional Options
 
+**General Options:**
 - `-r, --recursive`: Scan subdirectories recursively
-- `-v, --verbose`: Enable verbose output
+- `-v, --verbose`: Enable verbose output (show all FFmpeg output for debugging)
+- `--file-types TYPES`: Filter to specific file types (comma-separated, e.g., "wmv,avi,mov")
+
+**Re-encoding Options:**
 - `--target-codec {h264,hevc,av1}`: Target codec for re-encoding (default: hevc)
-- `--file-types`: Filter re-encoding to specific file types (comma-separated, e.g., "wmv,avi,mov")
 - `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
-- `--deep-scan`: Perform deep integrity check by decoding entire videos (slower but more thorough)
-- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
+- `--recover`: Enable error recovery mode for broken/corrupted videos
+- `--output-dir PATH`: Output directory for re-encoded videos
+
+**Duplicate Detection Options:**
 - `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
+- `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
+
+**Issue Detection Options:**
+- `--deep-scan`: Perform deep integrity check by decoding entire videos (slower but more thorough)
+
+**QuickLook Options:**
+- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
+
+**Queue Mode Options:**
 - `--queue-mode`: Enable network queue mode (see [Network Queue Mode](#network-queue-mode))
 - `--temp-dir PATH`: Temporary directory for queue mode (default: system temp)
 - `--max-temp-size GB`: Maximum temp storage size in GB for queue mode (default: 50)
@@ -371,12 +529,40 @@ Perform deep scan to find corrupted videos:
 python video_sentinel.py ~/Videos -r --check-issues --deep-scan
 ```
 
+Recover broken videos with error-tolerant encoding:
+```bash
+python video_sentinel.py ~/Videos --check-specs --re-encode --recover --file-types avi,wmv
+```
+
+Find duplicates by filename and auto-keep best (fast, works with broken originals):
+```bash
+python video_sentinel.py ~/Videos -r --filename-duplicates --duplicate-action auto-best
+```
+
+Fix QuickLook compatibility for network storage with queue mode:
+```bash
+python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --queue-mode --replace-original
+```
+
+Clean up duplicate re-encoded versions automatically:
+```bash
+python video_sentinel.py ~/Videos -r --find-duplicates --duplicate-action auto-best
+```
+
+Debug encoding issues with verbose output:
+```bash
+python video_sentinel.py ~/Videos/problem.avi --re-encode --recover -v
+```
+
 ## Modern Encoding Specs
 
+VideoSentinel works with **40+ video formats** including MP4, MKV, AVI, WMV, FLV, MOV, 3GP, VOB, TS, and many more.
+
 By default, VideoSentinel considers a video properly encoded if it meets:
-- Codec: H.265/HEVC (or H.264 minimum)
-- Container: MP4 or MKV
-- No corruption or encoding errors
+- **Modern codecs**: H.265/HEVC, AV1, or VP9 (H.264 is acceptable but not modern)
+- **Modern containers**: MP4, MKV/Matroska, or WebM
+- **Valid metadata**: Proper dimensions, duration, and stream information
+- **No corruption**: No encoding errors or frame corruption
 
 ## Smart Quality Matching
 
@@ -939,6 +1125,55 @@ This keeps your library organized without suffix clutter.
 - Instead of ending up with `video_reencoded.mp4`, you get the clean `video.mp4` filename
 - Keeps your library organized and avoids filename pollution
 
+### Filename-Based Duplicates
+
+For situations where perceptual hashing can't work (e.g., original files are too corrupted to extract frames), VideoSentinel offers fast filename-based duplicate detection:
+
+```bash
+# Find duplicates by filename only (fast, no video analysis)
+python video_sentinel.py /path/to/videos --filename-duplicates
+
+# Find filename duplicates and auto-keep best
+python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best
+
+# Interactive mode
+python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action interactive
+```
+
+**How it works:**
+- Normalizes filenames by removing `_reencoded` and `_quicklook` suffixes
+- Case-insensitive matching
+- Groups files with same base name regardless of extension
+- Example: `video.avi`, `video_reencoded.mp4`, `video.mkv` are grouped as duplicates
+
+**When to use:**
+- Original files are broken and can't generate perceptual hashes
+- You have re-encoded versions and want to clean up originals
+- You want fast duplicate detection without video analysis
+- Files have consistent naming but different formats/encodings
+
+**Benefits:**
+- **Much faster** than perceptual hashing (no video analysis required)
+- **Works with broken files** that won't play or can't be decoded
+- **Same quality ranking** as perceptual duplicate detection
+- **Same actions** available: report, auto-best, interactive
+
+**Example scenario:**
+```
+Files:
+  vacation.avi (corrupted, won't play)
+  vacation_reencoded.mp4 (HEVC, working)
+  vacation_quicklook.mp4 (H.264, working)
+
+Command:
+  python video_sentinel.py /videos --filename-duplicates --duplicate-action auto-best
+
+Result:
+  Keeps: vacation_reencoded.mp4 (highest quality)
+  Deletes: vacation.avi, vacation_quicklook.mp4
+  Renames: vacation_reencoded.mp4 → vacation.mp4
+```
+
 ## How Broken Video Detection Works
 
 VideoSentinel uses multiple techniques to identify corrupted, incomplete, or problematic video files:
@@ -1073,6 +1308,75 @@ Summary: 3 videos with issues
 - Detects frame-level corruption
 - Much slower (depends on video length)
 - Recommended when you suspect corruption
+
+## Debugging with Verbose Mode
+
+The `-v` or `--verbose` flag enables detailed output for debugging encoding issues and understanding what VideoSentinel is doing:
+
+**Normal mode (without `-v`):**
+```
+[1/5] Encoding: video.avi
+  Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
+✓ [1/5] Completed: video.avi (avg 45.2 fps, 1.8x speed)
+```
+- Shows compact inline progress that overwrites the same line
+- Clean, minimal output
+
+**Verbose mode (with `-v`):**
+```
+[1/5] Encoding: video.avi
+  Output: video_reencoded.mp4
+  Command: ffmpeg -loglevel info -stats ...
+  Recovery mode enabled: using error-tolerant FFmpeg flags
+  [all FFmpeg output lines...]
+  frame=1234 fps=45 q=28.0 size=1024kB time=00:01:23.45 bitrate=1234.5kbits/s speed=1.8x
+  [more FFmpeg output...]
+✓ [1/5] Completed: video.avi
+```
+- Shows ALL FFmpeg output line-by-line
+- Each line creates a new line (no overwriting)
+- More detailed but scrolls more
+- Shows recovery mode warnings and errors
+- Useful for diagnosing why encoding fails
+
+**When to use verbose mode:**
+- Debugging encoding failures
+- Understanding what recovery mode is doing
+- Troubleshooting corrupted files
+- Seeing detailed FFmpeg warnings
+- Investigating quality issues
+- Understanding codec parameters being used
+
+**When NOT to use verbose mode:**
+- Batch encoding many files (output is too verbose)
+- When you just want to see progress
+- Production/automated scripts
+
+**Example usage:**
+```bash
+# Debug a single problematic file
+python video_sentinel.py /path/to/broken.avi --check-specs --re-encode -v
+
+# See detailed output for recovery mode
+python video_sentinel.py /path/to/videos --re-encode --recover -v --file-types avi
+
+# Debug QuickLook issues
+python video_sentinel.py /path/to/videos --fix-quicklook -v
+
+# Verbose queue mode for debugging
+python video_sentinel.py /Volumes/NAS/videos --queue-mode --re-encode -v
+```
+
+**What verbose mode shows:**
+- Full FFmpeg command being executed
+- All FFmpeg warnings and errors
+- Frame-by-frame encoding progress
+- Quality (CRF) calculations and decisions
+- File validation details
+- Recovery mode flag explanations
+- Codec tag selections (e.g., hvc1 vs hev1)
+
+This makes verbose mode invaluable for understanding failures and debugging edge cases.
 
 ## License
 
