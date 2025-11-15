@@ -52,12 +52,17 @@ class Colors:
         return f"{Colors.BOLD}{text}{Colors.RESET}"
 
 
-def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
+def rank_video_quality(video_path: Path, video_info: VideoInfo, analyzer: VideoAnalyzer = None) -> int:
     """
     Rank video quality for duplicate selection
     Higher score = better quality
 
-    Considers: codec modernity, resolution, bitrate (normalized by codec efficiency)
+    Considers:
+    - Codec modernity
+    - Resolution
+    - Bitrate (normalized by codec efficiency)
+    - QuickLook compatibility (macOS)
+    - Recent processing (newly encoded files)
     """
     score = 0
 
@@ -103,6 +108,27 @@ def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
     normalized_bitrate = video_info.bitrate * efficiency
     score += int(normalized_bitrate // 10000)
 
+    # QuickLook compatibility bonus (significant advantage for macOS users)
+    if analyzer:
+        compat = analyzer.check_quicklook_compatibility(video_path)
+        if compat.get('compatible'):
+            score += 1500  # Big bonus for QuickLook compatible files
+
+    # Newly processed file bonus (prefer recently encoded/remuxed files)
+    # Files with _quicklook or _reencoded suffixes are newly processed
+    stem_lower = video_path.stem.lower()
+    if '_quicklook' in stem_lower or '_reencoded' in stem_lower:
+        score += 1000  # Bonus for newly processed files
+
+    # Container preference (MP4 > MKV > others for compatibility)
+    container_bonus = {
+        '.mp4': 300,
+        '.m4v': 300,
+        '.mkv': 100,
+        '.webm': 100,
+    }
+    score += container_bonus.get(video_path.suffix.lower(), 0)
+
     return score
 
 
@@ -144,10 +170,10 @@ def handle_duplicate_group(
         print(f"  {Colors.yellow('Warning: Could not analyze videos in this group')}")
         return to_delete, to_keep
 
-    # Rank videos by quality
+    # Rank videos by quality (including QuickLook compatibility and container preferences)
     ranked_videos = sorted(
         video_infos.keys(),
-        key=lambda v: rank_video_quality(v, video_infos[v]),
+        key=lambda v: rank_video_quality(v, video_infos[v], analyzer),
         reverse=True
     )
 
@@ -159,13 +185,23 @@ def handle_duplicate_group(
 
         print(f"  {Colors.green('✓ Keeping:')} {best_video.name}")
         info = video_infos[best_video]
-        print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps)")
+
+        # Check QuickLook compatibility for the kept file
+        compat = analyzer.check_quicklook_compatibility(best_video)
+        ql_status = " [QuickLook ✓]" if compat.get('compatible') else ""
+
+        print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
 
         for video in to_delete:
             info = video_infos[video]
             file_size_mb = video.stat().st_size / (1024 * 1024)
+
+            # Check QuickLook compatibility for files being deleted
+            compat = analyzer.check_quicklook_compatibility(video)
+            ql_status = " [QuickLook ✓]" if compat.get('compatible') else ""
+
             print(f"  {Colors.red('✗ Deleting:')} {video.name} ({file_size_mb:.2f} MB)")
-            print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps)")
+            print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
 
     elif action == 'interactive':
         # Show options and let user choose
@@ -178,7 +214,11 @@ def handle_duplicate_group(
             file_size_mb = video.stat().st_size / (1024 * 1024)
             quality_rank = "★ BEST" if idx == 1 else f"  #{idx}"
 
-            print(f"  {quality_rank} [{idx}] {video.name}")
+            # Check QuickLook compatibility
+            compat = analyzer.check_quicklook_compatibility(video)
+            ql_badge = " [QuickLook ✓]" if compat.get('compatible') else ""
+
+            print(f"  {quality_rank} [{idx}] {video.name}{ql_badge}")
             print(f"      Codec: {info.codec.upper()}, Resolution: {info.width}x{info.height}")
             print(f"      Bitrate: {info.bitrate//1000} kbps, Size: {file_size_mb:.2f} MB")
             print()

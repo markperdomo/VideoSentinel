@@ -1035,6 +1035,9 @@ python video_sentinel.py ~/Videos --find-duplicates --duplicate-action auto-best
 ```
 
 **How auto-best ranks quality:**
+- **QuickLook compatibility**: +1500 points for macOS QuickLook/Finder preview compatibility
+- **Newly processed files**: +1000 points for files with `_quicklook` or `_reencoded` suffixes
+- **Container format**: MP4/M4V (+300) > MKV/WebM (+100) > others
 - **Codec modernity**: AV1 > VP9 > HEVC > H.264 > older codecs
 - **Resolution**: Higher resolution scores higher
 - **Bitrate (normalized by codec efficiency)**: Modern codecs need less bitrate for equivalent quality
@@ -1057,10 +1060,10 @@ This ensures re-encoded videos with modern codecs are correctly ranked higher th
 **Example output:**
 ```
 Group 1:
-  ✓ Keeping: movie_hevc.mp4
-    (HEVC, 1920x1080, 5000 kbps)
-  ✗ Deleting: movie_h264.mp4 (450.23 MB)
-    (H264, 1920x1080, 3500 kbps)
+  ✓ Keeping: movie_quicklook.mp4
+    (HVC1, 1920x1080, 3000 kbps [QuickLook ✓])
+  ✗ Deleting: movie_original.mkv (450.23 MB)
+    (HEVC, 1920x1080, 3500 kbps)
   ✗ Deleting: movie_old.avi (850.45 MB)
     (MPEG4, 1920x1080, 8000 kbps)
 
@@ -1086,12 +1089,12 @@ python video_sentinel.py ~/Videos --find-duplicates --duplicate-action interacti
 ```
 Group 1 - 3 duplicates found:
 
-  ★ BEST [1] movie_hevc.mp4
-      Codec: HEVC, Resolution: 1920x1080
-      Bitrate: 5000 kbps, Size: 350.12 MB
+  ★ BEST [1] movie_quicklook.mp4 [QuickLook ✓]
+      Codec: HVC1, Resolution: 1920x1080
+      Bitrate: 3000 kbps, Size: 350.12 MB
 
-    #2 [2] movie_h264.mp4
-      Codec: H264, Resolution: 1920x1080
+    #2 [2] movie_original.mkv
+      Codec: HEVC, Resolution: 1920x1080
       Bitrate: 3500 kbps, Size: 450.23 MB
 
     #3 [3] movie_old.avi

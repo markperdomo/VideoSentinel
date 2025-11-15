@@ -341,15 +341,30 @@ After deleting duplicates (auto-best or interactive mode):
 - Shows progress: `✓ Renamed: video_reencoded.mp4 → video.mp4`
 - Handles errors gracefully (skips if target exists, shows error if rename fails)
 
-**Quality Ranking with Codec Efficiency** (video_sentinel.py:54-104)
-Duplicate quality ranking normalizes bitrate by codec efficiency:
-- HEVC/VP9: 2.0× multiplier (e.g., 3000 kbps → 6000 kbps H.264 equivalent)
-- AV1: 2.5× multiplier (e.g., 2000 kbps → 5000 kbps H.264 equivalent)
-- H.264: 1.0× baseline
-- MPEG4: 0.6× (less efficient than H.264)
+**Quality Ranking with Codec Efficiency** (video_sentinel.py:55-132)
+Duplicate quality ranking uses comprehensive scoring to prioritize the best file:
+
+**Ranking factors (in priority order):**
+1. **QuickLook compatibility**: +1500 points for macOS QuickLook/Finder preview compatibility
+2. **Newly processed files**: +1000 points for files with `_quicklook` or `_reencoded` suffixes
+3. **Container format**: MP4/M4V (+300), MKV/WebM (+100), others (0)
+4. **Codec modernity**: AV1 (1000), VP9 (900), HEVC/HVC1 (800), H.264 (400), MPEG4 (200), MPEG2/WMV (50-100)
+5. **Resolution**: Width × height / 1000
+6. **Normalized bitrate**: Bitrate adjusted by codec efficiency / 10000
+
+**Codec efficiency multipliers:**
+- AV1: 2.5× (e.g., 2000 kbps → 5000 kbps H.264 equivalent)
+- HEVC/VP9/HVC1: 2.0× (e.g., 3000 kbps → 6000 kbps H.264 equivalent)
+- H.264/AVC1: 1.0× baseline
+- MPEG4/XviD: 0.6× (less efficient than H.264)
 - MPEG2/WMV: 0.4-0.5× (much less efficient)
-- Ensures modern codec re-encodes rank higher than originals even at lower bitrate
-- Scoring: codec score (200-1000) + resolution pixels/1000 + normalized_bitrate/10000
+
+**Why this works:**
+- Ensures QuickLook-compatible files are always preferred (critical for macOS users)
+- Newly processed files rank higher than originals (avoids deleting fresh encodes)
+- MP4 container preferred over MKV for universal compatibility
+- Modern codec re-encodes rank higher than originals even at lower bitrate
+- Example: `movie_quicklook.mp4` (HVC1, 3000 kbps, MP4) beats `movie.mkv` (HEVC, 3500 kbps, MKV)
 
 **CLI Flags for New Features**
 - `--file-types TYPES`: Comma-separated file extensions to process (e.g., `wmv,avi,mov`)
