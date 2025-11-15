@@ -289,7 +289,17 @@ Python dependencies (requirements.txt):
 - av1 → libaom-av1 (FFmpeg encoder)
 
 **Video File Extensions** (video_analyzer.py:35)
-Supported: .mp4, .mkv, .avi, .mov, .wmv, .flv, .webm, .m4v, .mpg, .mpeg
+Supported: 40+ video formats including:
+- Modern: .mp4, .mkv, .webm, .m4v, .mov
+- Legacy: .avi, .wmv, .asf, .divx
+- MPEG: .mpg, .mpeg, .mpe, .mpv, .m2v, .mp2
+- Flash: .flv, .f4v, .f4p, .f4a, .f4b
+- Mobile: .3gp, .3g2
+- Broadcast: .mts, .m2ts, .ts, .mxf, .vob, .dv
+- Open: .ogv, .ogg, .ogm
+- RealMedia: .rm, .rmvb
+- QuickTime: .qt, .mqv
+- Other: .gif, .gifv, .yuv, .drc, .mng, .nsv, .roq, .svi, .dat, .vid, .movie, .amv, .xvid
 
 **Safety Defaults**
 - `keep_original=True`: Never deletes originals automatically (unless `--replace-original` is used)

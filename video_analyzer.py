@@ -31,8 +31,31 @@ class VideoInfo:
 class VideoAnalyzer:
     """Analyzes video files to extract encoding information"""
 
-    # Common video file extensions
-    VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'}
+    # Common video file extensions - comprehensive list covering most video formats
+    VIDEO_EXTENSIONS = {
+        # Common modern formats
+        '.mp4', '.mkv', '.webm', '.m4v', '.mov',
+        # Legacy/Windows formats
+        '.avi', '.wmv', '.asf', '.divx',
+        # MPEG variants
+        '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.mp2',
+        # Flash/streaming
+        '.flv', '.f4v', '.f4p', '.f4a', '.f4b',
+        # Mobile/3GPP
+        '.3gp', '.3g2',
+        # Broadcast/professional
+        '.mts', '.m2ts', '.ts', '.mxf', '.vob', '.dv',
+        # Open formats
+        '.ogv', '.ogg', '.ogm',
+        # RealMedia
+        '.rm', '.rmvb',
+        # QuickTime variants
+        '.qt', '.mqv',
+        # Other formats
+        '.gif', '.gifv', '.yuv', '.drc', '.mng', '.nsv', '.roq', '.svi',
+        # Additional common extensions
+        '.dat', '.vid', '.movie', '.amv', '.xvid'
+    }
 
     # Modern codec standards - includes all variations and tags
     MODERN_CODECS = {'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
