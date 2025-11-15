@@ -696,6 +696,43 @@ def main():
                   f"{Colors.red(f'{len(videos_to_reencode)} need re-encode')}")
             print()
 
+            # Check for existing QuickLook outputs to avoid re-processing
+            if videos_to_remux or videos_to_reencode:
+                print("Checking for existing QuickLook outputs...")
+                videos_remux_needed = []
+                videos_reencode_needed = []
+                videos_already_fixed = []
+
+                all_videos_to_check = videos_to_remux + videos_to_reencode
+
+                for video_path in tqdm(all_videos_to_check, desc="Checking for existing outputs", unit="video"):
+                    # Look for existing _quicklook or _reencoded files
+                    existing_output = encoder.find_existing_output(
+                        video_path,
+                        target_codec=args.target_codec,
+                        check_suffixes=['_quicklook', '_reencoded']
+                    )
+
+                    if existing_output:
+                        videos_already_fixed.append((video_path, existing_output))
+                        tqdm.write(Colors.green(f"✓ {video_path.name}: Already has valid output ({existing_output.name})"))
+                    else:
+                        # Add to appropriate list based on original categorization
+                        if video_path in videos_to_remux:
+                            videos_remux_needed.append(video_path)
+                        else:
+                            videos_reencode_needed.append(video_path)
+
+                print()
+                if videos_already_fixed:
+                    print(f"Found {len(videos_already_fixed)} video(s) with existing valid QuickLook outputs (skipping)")
+                    print(f"Need to fix: {len(videos_remux_needed) + len(videos_reencode_needed)} video(s)")
+                    print()
+
+                # Update the lists with only videos that need processing
+                videos_to_remux = videos_remux_needed
+                videos_to_reencode = videos_reencode_needed
+
             # Combine all videos that need fixing (remux or re-encode)
             all_videos_to_fix = videos_to_remux + videos_to_reencode
 

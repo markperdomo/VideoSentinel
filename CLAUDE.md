@@ -792,12 +792,20 @@ python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --que
 **Implementation details:**
 - Compatibility check: `video_analyzer.py:200-283` (`check_quicklook_compatibility()`)
 - Fast remux: `encoder.py:703-779` (`remux_to_mp4()`)
-- Integration: `video_sentinel.py:588-679`
+- Integration: `video_sentinel.py:699-909` (includes queue mode support)
+
+**Smart Resume Support:**
+- Automatically checks for existing `_quicklook` or `_reencoded` files before processing
+- Validates existing outputs (size, format, duration)
+- Skips files with valid outputs to avoid re-processing
+- Safe to interrupt (Ctrl+C) and resume - picks up where it left off
+- Works with both direct mode and queue mode
 
 **Why this is useful:**
 - Many HEVC videos in MKV containers won't preview in Finder
 - Re-encoding would take hours, remuxing takes seconds
 - Ensures entire library works with QuickLook/spacebar preview
+- Resume capability saves time on large batch jobs
 
 ### Filtering by File Type
 

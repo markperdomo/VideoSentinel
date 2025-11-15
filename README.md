@@ -278,8 +278,26 @@ Re-encoding: video3.mp4
 **Benefits:**
 - ✅ **Fast**: Remuxing MKV→MP4 takes seconds (no re-encoding!)
 - ✅ **Smart**: Only re-encodes when absolutely necessary
+- ✅ **Resume-Safe**: Automatically skips files with existing `_quicklook` or `_reencoded` outputs
 - ✅ **Safe**: Works with `--replace-original` flag
 - ✅ **Compatible**: Works with queue mode for network storage
+
+**Smart Resume:**
+If you interrupt the process (Ctrl+C) and re-run the same command, VideoSentinel will:
+1. Check for existing `_quicklook` or `_reencoded` files
+2. Validate each existing output (size, format, duration)
+3. Skip files with valid outputs
+4. Only process files that haven't been fixed yet
+
+**Example:**
+```
+Checking for existing QuickLook outputs...
+✓ video1.mkv: Already has valid output (video1_quicklook.mp4)
+✓ video2.mkv: Already has valid output (video2_quicklook.mp4)
+
+Found 2 video(s) with existing valid QuickLook outputs (skipping)
+Need to fix: 3 video(s)
+```
 
 **Note:** Only processes videos that already meet modern codec specs. Use `--re-encode` for videos with old codecs.
 
