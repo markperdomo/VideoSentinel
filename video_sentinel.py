@@ -696,66 +696,180 @@ def main():
                   f"{Colors.red(f'{len(videos_to_reencode)} need re-encode')}")
             print()
 
-            # Remux videos (fast - just container change)
-            if videos_to_remux:
+            # Combine all videos that need fixing (remux or re-encode)
+            all_videos_to_fix = videos_to_remux + videos_to_reencode
+
+            # Process with queue mode if enabled
+            if all_videos_to_fix and args.queue_mode:
+                print()
                 print("="*80)
-                print("REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)")
+                print("QUEUE MODE ENABLED FOR QUICKLOOK FIX")
+                print("="*80)
+                print(f"Temp directory: {args.temp_dir or 'system temp'}")
+                print(f"Buffer size: {args.buffer_size} files")
+                print(f"Max temp storage: {args.max_temp_size} GB")
+                print()
+                print("Pipeline stages:")
+                print("  1. DOWNLOAD: Network → Local temp storage")
+                print("  2. FIX: Remux or re-encode (local, fast!)")
+                print("  3. UPLOAD: Local → Network")
                 print("="*80)
                 print()
 
-                for video_path in videos_to_remux:
-                    output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+                # Initialize queue manager
+                queue_manager = NetworkQueueManager(
+                    temp_dir=args.temp_dir,
+                    max_buffer_size=args.buffer_size,
+                    max_temp_size_gb=args.max_temp_size,
+                    verbose=args.verbose,
+                    replace_original=args.replace_original
+                )
 
-                    print(f"Remuxing: {video_path.name}")
-                    success = encoder.remux_to_mp4(video_path, output_path)
+                # Try to resume from previous state
+                if queue_manager.load_state():
+                    print("Resumed from previous session")
+                    print()
 
-                    if success:
-                        if args.replace_original:
-                            # Delete original and rename output
-                            video_path.unlink()
-                            output_path.rename(video_path.with_suffix('.mp4'))
-                            print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
-                        else:
-                            print(f"✓ Created: {output_path.name}")
+                # Add files to queue
+                queue_manager.add_files(all_videos_to_fix)
+
+                # Create processing callback
+                current_idx = [0]
+                total = len(all_videos_to_fix)
+
+                def quicklook_fix_callback(local_input: Path, local_output: Path) -> bool:
+                    """Callback for fixing QuickLook compatibility in queue mode"""
+                    current_idx[0] += 1
+
+                    # Find the original network path to determine if remux or re-encode
+                    needs_remux = False
+                    needs_reencode = False
+                    video_info = None
+
+                    # Check if this file needs remux or re-encode
+                    for orig_path in videos_to_remux:
+                        check_name = local_input.name.replace('download_', '')
+                        if orig_path.name == check_name:
+                            needs_remux = True
+                            break
+
+                    for orig_path in videos_to_reencode:
+                        check_name = local_input.name.replace('download_', '')
+                        if orig_path.name == check_name:
+                            needs_reencode = True
+                            video_info = analyzer.get_video_info(local_input)
+                            break
+
+                    # Process based on what's needed
+                    if needs_remux:
+                        print(f"[{current_idx[0]}/{total}] Remuxing: {local_input.name}")
+                        success = encoder.remux_to_mp4(local_input, local_output)
+                        if success:
+                            print(f"✓ [{current_idx[0]}/{total}] Completed: {local_input.name}")
+                        return success
+                    elif needs_reencode:
+                        success = encoder.re_encode_video(
+                            local_input,
+                            local_output,
+                            target_codec=args.target_codec,
+                            video_info=video_info,
+                            current_index=current_idx[0],
+                            total_count=total,
+                            keep_original=True,
+                            replace_original=False
+                        )
+                        return success
                     else:
-                        print(f"✗ Failed: {video_path.name}")
+                        return False
 
-                print()
+                try:
+                    # Start the queue
+                    print("Starting queue pipeline...")
+                    print()
+                    start_shutdown_listener()
+                    queue_manager.start(quicklook_fix_callback)
 
-            # Re-encode videos (slower - needs full re-encode)
-            if videos_to_reencode:
-                print("="*80)
-                print("RE-ENCODING FOR QUICKLOOK COMPATIBILITY")
-                print("="*80)
-                print()
+                    # Show final progress
+                    progress = queue_manager.get_progress()
+                    print()
+                    print("="*80)
+                    print("QUEUE MODE COMPLETE")
+                    print("="*80)
+                    print(f"Completed: {Colors.green(str(progress['complete']))}")
+                    if progress['failed'] > 0:
+                        print(f"Failed: {Colors.red(str(progress['failed']))}")
+                    print("="*80)
+                    print()
 
-                for video_path in videos_to_reencode:
-                    video_info = analyzer.get_video_info(video_path)
-                    output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+                except KeyboardInterrupt:
+                    print("\n\nInterrupted by user. Queue state saved for resume.")
+                    print("Run the same command again to resume from where you left off.")
+                    sys.exit(0)
+                finally:
+                    stop_shutdown_listener()
 
-                    print(f"Re-encoding: {video_path.name}")
-                    success = encoder.re_encode_video(
-                        video_path,
-                        output_path,
-                        target_codec=args.target_codec,
-                        video_info=video_info,
-                        keep_original=not args.replace_original
-                    )
+            # Otherwise process directly (no queue mode)
+            elif all_videos_to_fix:
+                # Remux videos (fast - just container change)
+                if videos_to_remux:
+                    print("="*80)
+                    print("REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)")
+                    print("="*80)
+                    print()
 
-                    if success:
-                        if args.replace_original:
-                            # Delete original and rename output
-                            if video_path.exists() and video_path != output_path:
+                    for video_path in videos_to_remux:
+                        output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+
+                        print(f"Remuxing: {video_path.name}")
+                        success = encoder.remux_to_mp4(video_path, output_path)
+
+                        if success:
+                            if args.replace_original:
+                                # Delete original and rename output
                                 video_path.unlink()
-                            if output_path != video_path.with_suffix('.mp4'):
                                 output_path.rename(video_path.with_suffix('.mp4'))
-                            print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                                print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                            else:
+                                print(f"✓ Created: {output_path.name}")
                         else:
-                            print(f"✓ Created: {output_path.name}")
-                    else:
-                        print(f"✗ Failed: {video_path.name}")
+                            print(f"✗ Failed: {video_path.name}")
 
-                print()
+                    print()
+
+                # Re-encode videos (slower - needs full re-encode)
+                if videos_to_reencode:
+                    print("="*80)
+                    print("RE-ENCODING FOR QUICKLOOK COMPATIBILITY")
+                    print("="*80)
+                    print()
+
+                    for video_path in videos_to_reencode:
+                        video_info = analyzer.get_video_info(video_path)
+                        output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
+
+                        print(f"Re-encoding: {video_path.name}")
+                        success = encoder.re_encode_video(
+                            video_path,
+                            output_path,
+                            target_codec=args.target_codec,
+                            video_info=video_info,
+                            keep_original=not args.replace_original
+                        )
+
+                        if success:
+                            if args.replace_original:
+                                # Delete original and rename output
+                                if video_path.exists() and video_path != output_path:
+                                    video_path.unlink()
+                                if output_path != video_path.with_suffix('.mp4'):
+                                    output_path.rename(video_path.with_suffix('.mp4'))
+                                print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                            else:
+                                print(f"✓ Created: {output_path.name}")
+                        else:
+                            print(f"✗ Failed: {video_path.name}")
+
+                    print()
 
     # Find duplicates
     if args.find_duplicates or args.filename_duplicates:
