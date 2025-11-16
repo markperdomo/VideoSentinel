@@ -99,8 +99,11 @@ class ShutdownManager:
         import os
         in_tmux = os.environ.get('TMUX') is not None
         in_screen = os.environ.get('STY') is not None
+        # Also check TERM variable which often contains "tmux" or "screen"
+        term = os.environ.get('TERM', '').lower()
+        in_multiplexer = 'tmux' in term or 'screen' in term
 
-        if in_tmux or in_screen:
+        if in_tmux or in_screen or in_multiplexer:
             # In tmux/screen, don't use terminal manipulation at all
             # Just silently disable the listener to avoid breaking the terminal
             return

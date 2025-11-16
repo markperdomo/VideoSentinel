@@ -969,6 +969,9 @@ def main():
 
     # Find duplicates
     if args.find_duplicates or args.filename_duplicates:
+        # Stop shutdown listener to restore normal terminal mode for input prompts
+        stop_shutdown_listener()
+
         print("="*80)
         print("DUPLICATE VIDEO DETECTION")
         if args.filename_duplicates:
