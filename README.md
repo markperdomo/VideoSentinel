@@ -100,6 +100,11 @@ Scan a directory and run all checks:
 python video_sentinel.py /path/to/videos
 ```
 
+Process a single file:
+```bash
+python video_sentinel.py /path/to/video.mp4
+```
+
 ### Specific Operations
 
 Check encoding specifications only:
@@ -132,6 +137,11 @@ python video_sentinel.py /path/to/videos --check-issues --deep-scan
 Re-encode videos that don't meet specs (keeps originals with `_reencoded` suffix):
 ```bash
 python video_sentinel.py /path/to/videos --check-specs --re-encode
+```
+
+Re-encode a single file:
+```bash
+python video_sentinel.py /path/to/video.avi --check-specs --re-encode
 ```
 
 Re-encode only specific file types (great for cleaning up legacy formats):
@@ -570,6 +580,16 @@ python video_sentinel.py ~/Videos --check-specs --re-encode --recover --file-typ
 Downscale 4K videos to 1080p for space savings:
 ```bash
 python video_sentinel.py ~/Videos -r --check-specs --re-encode --downscale-1080p --replace-original
+```
+
+Downscale a single 4K file:
+```bash
+python video_sentinel.py ~/Videos/movie_4k.mkv --re-encode --downscale-1080p --replace-original
+```
+
+Fix QuickLook compatibility for a single file:
+```bash
+python video_sentinel.py ~/Videos/movie.mkv --fix-quicklook --replace-original
 ```
 
 Find duplicates by filename and auto-keep best (fast, works with broken originals):

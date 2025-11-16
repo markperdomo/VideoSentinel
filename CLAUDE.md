@@ -18,6 +18,9 @@ pip install -r requirements.txt
 # Scan a directory with all checks (default behavior)
 python video_sentinel.py /path/to/videos
 
+# Process a single file
+python video_sentinel.py /path/to/video.mp4
+
 # Check encoding specifications only
 python video_sentinel.py /path/to/videos --check-specs
 
@@ -38,11 +41,20 @@ python video_sentinel.py /path/to/videos --check-issues --deep-scan
 # Re-encode non-compliant videos with smart quality matching
 python video_sentinel.py /path/to/videos --check-specs --re-encode
 
+# Re-encode a single file
+python video_sentinel.py /path/to/video.avi --check-specs --re-encode
+
 # Re-encode with error recovery mode (salvage broken/corrupted files)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --recover
 
+# Recover a single broken file
+python video_sentinel.py /path/to/broken.avi --re-encode --recover
+
 # Downscale videos larger than 1080p to maximum 1920x1080 (preserves aspect ratio)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p
+
+# Downscale a single 4K file
+python video_sentinel.py /path/to/4k_movie.mkv --re-encode --downscale-1080p --replace-original
 
 # Downscale 4K videos and replace originals (great for space savings)
 python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original

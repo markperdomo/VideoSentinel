@@ -255,10 +255,10 @@ def main():
     )
 
     parser.add_argument(
-        'directory',
+        'path',
         type=Path,
         nargs='?',
-        help='Directory containing video files to analyze (not required for --clear-queue)'
+        help='Video file or directory to analyze (not required for --clear-queue)'
     )
 
     parser.add_argument(
@@ -426,17 +426,21 @@ def main():
         print("="*80)
         sys.exit(0)
 
-    # Validate input directory (required unless using --clear-queue)
-    if not args.directory:
-        print(f"Error: Directory argument is required", file=sys.stderr)
+    # Validate input path (required unless using --clear-queue)
+    if not args.path:
+        print(f"Error: Path argument is required (provide a video file or directory)", file=sys.stderr)
         sys.exit(1)
 
-    if not args.directory.exists():
-        print(f"Error: Directory '{args.directory}' does not exist", file=sys.stderr)
+    if not args.path.exists():
+        print(f"Error: Path '{args.path}' does not exist", file=sys.stderr)
         sys.exit(1)
 
-    if not args.directory.is_dir():
-        print(f"Error: '{args.directory}' is not a directory", file=sys.stderr)
+    # Check if path is a file or directory
+    is_single_file = args.path.is_file()
+    is_directory = args.path.is_dir()
+
+    if not is_single_file and not is_directory:
+        print(f"Error: '{args.path}' is not a file or directory", file=sys.stderr)
         sys.exit(1)
 
     # If re-encode is specified, automatically enable check-specs (required for re-encoding)
@@ -463,8 +467,11 @@ def main():
     print("="*80)
     print(f"VideoSentinel - Video Library Manager")
     print("="*80)
-    print(f"Scanning directory: {args.directory}")
-    print(f"Recursive scan: {args.recursive}")
+    if is_single_file:
+        print(f"Processing file: {args.path}")
+    else:
+        print(f"Scanning directory: {args.path}")
+        print(f"Recursive scan: {args.recursive}")
     print(f"Target codec: {args.target_codec.upper()}")
     print("="*80)
     print()
@@ -483,13 +490,17 @@ def main():
         ]
         print(f"File type filter: {', '.join(file_types_filter).upper()}")
 
-    # Find all video files (filtered by file types if specified)
-    print("Finding video files...")
-    video_files = analyzer.find_videos(
-        args.directory,
-        recursive=args.recursive,
-        file_types=file_types_filter
-    )
+    # Find all video files (or use single file)
+    if is_single_file:
+        print(f"Processing single file: {args.path.name}")
+        video_files = [args.path]
+    else:
+        print("Finding video files...")
+        video_files = analyzer.find_videos(
+            args.path,
+            recursive=args.recursive,
+            file_types=file_types_filter
+        )
 
     if not video_files:
         if file_types_filter:
