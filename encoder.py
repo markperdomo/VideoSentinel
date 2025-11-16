@@ -498,9 +498,10 @@ class VideoEncoder:
                                     # Fallback to time-based display if no duration
                                     progress_msg = f"  Encoding: {time_str} | {speed}x speed"
 
-                                # Use print with carriage return to overwrite the same line
-                                # Clear line first, then write progress
-                                print(f"\r{progress_msg:<100}", end='', flush=True)
+                                # Use ANSI escape sequences for more reliable line overwriting
+                                # \r = carriage return, \033[K = clear to end of line
+                                # This works more reliably in tmux/screen than just \r
+                                print(f"\r\033[K{progress_msg}", end='', flush=True)
                         elif self.verbose and line.strip():
                             # In verbose mode, show ALL ffmpeg output
                             tqdm.write(f"  {line.rstrip()}")
