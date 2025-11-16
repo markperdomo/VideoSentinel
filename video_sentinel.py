@@ -230,7 +230,7 @@ def handle_duplicate_group(
         print(f"  0 or Enter: Keep all (no action)")
         print()
 
-        choice = input(f"Your choice: ").strip()
+        choice = input(f"Your choice: ").strip().replace('\r', '')
 
         if choice.isdigit() and 1 <= int(choice) <= len(ranked_videos):
             keep_idx = int(choice) - 1
@@ -1031,7 +1031,7 @@ def main():
 
                     if args.duplicate_action == 'auto-best':
                         # Auto mode - delete immediately
-                        confirm = input(f"\nDelete {len(all_to_delete)} files? (yes/no): ").strip().lower()
+                        confirm = input(f"\nDelete {len(all_to_delete)} files? (yes/no): ").strip().replace('\r', '').lower()
                         if confirm == 'yes':
                             deleted_count = 0
                             total_size_freed = 0
