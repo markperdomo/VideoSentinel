@@ -41,6 +41,8 @@ class ShutdownManager:
         self._listener_thread: Optional[threading.Thread] = None
         self._stop_listener = False
         self._lock = threading.Lock()
+        self._original_terminal_settings = None
+        self._terminal_fd = None
 
     def start(self):
         """Start listening for shutdown key in background thread"""
@@ -60,11 +62,25 @@ class ShutdownManager:
             self._listener_thread.start()
 
     def stop(self):
-        """Stop the listener thread"""
+        """Stop the listener thread and restore terminal settings"""
         self._stop_listener = True
-        if self._listener_thread is not None:
-            # Don't join - it's a daemon thread and might be blocking on input
-            self._listener_thread = None
+
+        # Wait for thread to finish (with timeout) so terminal gets restored
+        if self._listener_thread is not None and self._listener_thread.is_alive():
+            self._listener_thread.join(timeout=0.5)
+
+        # Explicitly restore terminal settings if they were saved
+        if self._original_terminal_settings is not None and self._terminal_fd is not None:
+            try:
+                import termios
+                termios.tcsetattr(self._terminal_fd, termios.TCSADRAIN, self._original_terminal_settings)
+            except:
+                pass
+            finally:
+                self._original_terminal_settings = None
+                self._terminal_fd = None
+
+        self._listener_thread = None
 
     def shutdown_requested(self) -> bool:
         """
@@ -117,6 +133,10 @@ class ShutdownManager:
             fd = sys.stdin.fileno()
             old_settings = termios.tcgetattr(fd)
 
+            # Store for explicit restoration in stop()
+            self._terminal_fd = fd
+            self._original_terminal_settings = old_settings
+
             try:
                 # Use cbreak mode instead of raw mode
                 # Cbreak allows Ctrl+C to work but gives immediate key detection
@@ -141,6 +161,9 @@ class ShutdownManager:
             finally:
                 # Restore original terminal settings
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                # Clear saved settings after restoration
+                self._original_terminal_settings = None
+                self._terminal_fd = None
 
         except Exception as e:
             # Fall back to blocking input if cbreak mode fails

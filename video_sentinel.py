@@ -251,6 +251,24 @@ def handle_duplicate_group(
 
 def main():
     """Main entry point for VideoSentinel CLI"""
+    # Reset terminal to normal mode at startup (in case previous run left it in cbreak mode)
+    if sys.stdin.isatty():
+        try:
+            import termios
+            fd = sys.stdin.fileno()
+            # Get current settings
+            try:
+                attrs = termios.tcgetattr(fd)
+                # Enable canonical mode (ICANON) and echo (ECHO) for normal line-buffered input
+                # This reverses cbreak/raw mode settings
+                attrs[3] |= termios.ICANON | termios.ECHO  # lflag
+                termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            except:
+                pass
+        except ImportError:
+            # On Windows or systems without termios, skip
+            pass
+
     parser = argparse.ArgumentParser(
         description='VideoSentinel - Manage and validate your video library',
         formatter_class=argparse.RawDescriptionHelpFormatter
