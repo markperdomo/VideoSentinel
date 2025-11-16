@@ -217,8 +217,9 @@ reports/
 duplicate_report.txt
 encoding_report.txt
 
-# Documentation builds
+# Documentation builds (but not docs/ source files)
 docs/_build/
+docs/site/
 site/
 
 # Test files

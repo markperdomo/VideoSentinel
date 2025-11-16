@@ -6,121 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 VideoSentinel is a Python CLI utility for managing and validating video libraries. It ensures videos are properly encoded to modern specifications (H.265/HEVC), detects duplicates using perceptual hashing, and identifies encoding issues.
 
-## Essential Commands
-
-### Development Environment Setup
-```bash
-pip install -r requirements.txt
-```
-
-### Running the Application
-```bash
-# Scan a directory with all checks (default behavior)
-python video_sentinel.py /path/to/videos
-
-# Process a single file
-python video_sentinel.py /path/to/video.mp4
-
-# Check encoding specifications only
-python video_sentinel.py /path/to/videos --check-specs
-
-# Find duplicates using perceptual hashing
-python video_sentinel.py /path/to/videos --find-duplicates
-
-# Find duplicates by filename only (fast, no perceptual hashing)
-# Matches files with same name ignoring extension and _reencoded/_quicklook suffixes
-# Useful when original files are broken and can't generate perceptual hashes
-python video_sentinel.py /path/to/videos --filename-duplicates
-
-# Check for encoding issues
-python video_sentinel.py /path/to/videos --check-issues
-
-# Deep scan (decodes entire videos to find corruption - slow)
-python video_sentinel.py /path/to/videos --check-issues --deep-scan
-
-# Re-encode non-compliant videos with smart quality matching
-python video_sentinel.py /path/to/videos --check-specs --re-encode
-
-# Re-encode a single file
-python video_sentinel.py /path/to/video.avi --check-specs --re-encode
-
-# Re-encode with error recovery mode (salvage broken/corrupted files)
-python video_sentinel.py /path/to/videos --check-specs --re-encode --recover
-
-# Recover a single broken file
-python video_sentinel.py /path/to/broken.avi --re-encode --recover
-
-# Downscale videos larger than 1080p to maximum 1920x1080 (preserves aspect ratio)
-python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p
-
-# Downscale a single 4K file
-python video_sentinel.py /path/to/4k_movie.mkv --re-encode --downscale-1080p --replace-original
-
-# Downscale 4K videos and replace originals (great for space savings)
-python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original
-
-# Process only specific file types (filters at file discovery - applies to all operations)
-python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
-
-# Find duplicates only among AVI files
-python video_sentinel.py /path/to/videos --find-duplicates --file-types avi
-
-# Check issues only for WMV and FLV files
-python video_sentinel.py /path/to/videos --check-issues --file-types wmv,flv
-
-# Replace original files with re-encoded versions (deletes source, renames output)
-# Safe to interrupt and resume - automatically detects completed/partial work
-python video_sentinel.py /path/to/videos --check-specs --re-encode --replace-original
-
-# Recursive scan
-python video_sentinel.py /path/to/videos -r --check-specs
-
-# Verbose output (shows all FFmpeg output, useful for debugging)
-python video_sentinel.py /path/to/videos -v
-
-# Find duplicates and automatically keep best quality
-python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action auto-best
-
-# Find duplicates and interactively choose what to keep
-python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action interactive
-
-# Find filename duplicates and auto-keep best (fast, works with broken originals)
-python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best
-
-# Fix QuickLook compatibility (fast remux MKV→MP4, fix HEVC tags)
-python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
-
-# Fix QuickLook compatibility and replace originals
-python video_sentinel.py /path/to/videos --check-specs --fix-quicklook --replace-original
-
-# Network queue mode (for network storage - downloads local, encodes fast, uploads back)
-python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode
-
-# Network queue mode with custom temp dir and settings
-python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode \
-  --temp-dir /Users/you/temp --buffer-size 3 --max-temp-size 100
-
-# Clear queue state and temp files
-python video_sentinel.py --clear-queue
-
-# Monitor queue mode status (during or after encoding)
-python monitor_queue.py
-
-# Monitor with custom temp dir
-python monitor_queue.py --temp-dir /Users/you/temp
-```
-
-### Testing Individual Modules
-```bash
-# Test video analysis
-python -c "from video_analyzer import VideoAnalyzer; from pathlib import Path; a = VideoAnalyzer(verbose=True); print(a.get_video_info(Path('test.mp4')))"
-
-# Test duplicate detection
-python -c "from duplicate_detector import DuplicateDetector; from pathlib import Path; d = DuplicateDetector(verbose=True); print(d.get_similarity_score(Path('video1.mp4'), Path('video2.mp4')))"
-
-# Test encoding
-python -c "from encoder import VideoEncoder; from pathlib import Path; e = VideoEncoder(verbose=True); e.re_encode_video(Path('input.mp4'), Path('output.mp4'))"
-```
+Key features:
+- Video encoding validation and re-encoding to modern codecs (HEVC, AV1, VP9)
+- Perceptual hash-based duplicate detection
+- Filename-based duplicate detection (fast alternative)
+- Error recovery mode for corrupted videos
+- Network queue mode for optimal encoding on network storage
+- macOS QuickLook compatibility fixes
+- Graceful shutdown and resume support
 
 ## Architecture
 
@@ -130,7 +23,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 
 **video_sentinel.py** (Main CLI Entry Point)
 - Orchestrates all operations via argparse CLI
-- Initializes and coordinates all four core modules
+- Initializes and coordinates all core modules
 - Handles user interaction and progress reporting with tqdm
 - No business logic - pure coordination layer
 
@@ -139,6 +32,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Returns `VideoInfo` dataclass with all video properties
 - Determines if videos meet modern specs (HEVC/H.265, AV1, VP9)
 - Finds video files by extension in directories
+- QuickLook compatibility checking (video_analyzer.py:200-283)
 
 **duplicate_detector.py** (Perceptual Hash Comparison & Filename Matching)
 - Implements multi-frame perceptual hashing using OpenCV and ImageHash
@@ -159,6 +53,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Validates output before considering encoding successful (checks file size, dimensions, duration)
 - Automatically cleans up invalid outputs; preserves originals by default
 - Resume-safe: validates existing outputs and skips re-encoding if valid
+- Fast remux capability for QuickLook fixes (encoder.py:703-779)
 
 **issue_detector.py** (Problem Detection)
 - Quick scan: checks duration, audio presence, unusual specs (dimensions, fps, aspect ratio)
@@ -177,19 +72,10 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - State persistence for resume support (survives Ctrl+C interrupts)
 - Automatic cleanup of temp files after successful upload
 - Handles network filesystem limitations (falls back from copy2 to copy for metadata)
-- **Resume State Validation** (network_queue_manager.py:458-540):
-  - When resuming from saved state, validates temp files still exist
-  - Checks if local downloads still exist in temp dir
-  - Checks if encoded outputs still exist
-  - Automatically re-downloads if temp files missing
-  - Shows detailed resume summary with file state breakdown:
-    - Already complete (skip)
-    - Previously failed (skip)
-    - Resuming upload (output exists)
-    - Resuming encoding (local file exists)
-    - Re-encoding (interrupted, local file exists)
-    - Pending download (not started)
-    - Re-downloading (temp files missing)
+- Resume State Validation (network_queue_manager.py:458-540):
+  - Validates temp files still exist when resuming
+  - Re-downloads if temp files missing
+  - Shows detailed resume summary with file state breakdown
 
 **shutdown_manager.py** (Graceful Shutdown Control)
 - Provides thread-safe graceful shutdown mechanism during batch operations
@@ -277,19 +163,6 @@ Provides thread-safe graceful shutdown during batch encoding operations:
 6. Automatically cleans up listener threads when encoding completes
 7. Works in both batch encoding mode and queue mode
 8. Implementation: Singleton pattern with `get_shutdown_manager()` for global access
-
-### Dependencies
-
-All video operations depend on **FFmpeg** being installed:
-- `ffprobe`: Metadata extraction and validation
-- `ffmpeg`: Re-encoding and integrity checks
-
-Python dependencies (requirements.txt):
-- **opencv-python**: Frame extraction from videos
-- **imagehash**: Perceptual hashing (phash algorithm)
-- **Pillow**: Image processing for hashing
-- **ffmpeg-python**: FFmpeg wrapper utilities
-- **tqdm**: Progress bars for CLI
 
 ### Important Implementation Details
 
@@ -389,509 +262,29 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - `movie_reencoded.mp4` (1080p, 3000 kbps) beats `movie.mkv` (4K, 10000 kbps) ← intentional!
   - `movie_quicklook.mp4` (HVC1, 3000 kbps, MP4) beats `movie.mkv` (HEVC, 3500 kbps, MKV)
 
-**CLI Flags for New Features**
+**CLI Flags for Key Features**
 - `--file-types TYPES`: Comma-separated file extensions to process (e.g., `wmv,avi,mov`)
-  - Filters files at discovery stage (applies to all operations: check-specs, duplicates, issues, re-encode)
+  - Filters files at discovery stage (applies to all operations)
   - More efficient than scanning all files then filtering later
-  - Only files matching specified extensions are loaded, analyzed, and processed
+- `--max-files N`: Limit processing to first N files found (e.g., `--max-files 100`)
+  - Stops after discovering N files, then processes them normally
+  - Perfect for manageable batches, testing, or incremental processing
+  - Respects `--file-types` and `--recursive` flags (applies limit after filtering)
+  - Implementation: `video_sentinel.py:370-374` (argument), `video_sentinel.py:531-534` (limit logic)
 - `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
   - Matches files with same name ignoring extension and `_reencoded`/`_quicklook` suffixes
-  - Much faster than `--find-duplicates` (no video analysis required)
   - Useful when original files are broken and can't generate perceptual hashes
-  - Example: groups `video.avi`, `video_reencoded.mp4`, `video.mkv` as duplicates
 - `--recover`: Enable error recovery mode during re-encoding
   - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
-  - Input flags (before `-i`): `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
-  - Output flags (after `-i`): `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
-  - Ignores decoding errors, generates missing timestamps, discards corrupted packets
-  - Useful for recovering videos that won't play or fail to encode normally
-  - Combined with `--re-encode` flag
+  - Input flags: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
+  - Output flags: `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
 - `--downscale-1080p`: Downscale videos larger than 1080p during re-encoding
   - Limits maximum resolution to 1920x1080 while preserving aspect ratio
-  - Uses two-stage FFmpeg scale filter for proper dimension handling:
-    - Stage 1: `scale=1920:1080:force_original_aspect_ratio=decrease` - fit within 1920x1080
-    - Stage 2: `scale=trunc(iw/2)*2:trunc(ih/2)*2` - ensure dimensions divisible by 2
-  - The two-stage approach prevents "Cannot open libx265 encoder" errors from odd dimensions
+  - Uses two-stage FFmpeg scale filter for proper dimension handling
   - Only scales down, never upscales (videos ≤1080p are unchanged)
-  - Automatically handles different aspect ratios (16:9, 21:9, 4:3, etc.)
-  - Useful for reducing file size and storage requirements
-  - Example: 3840x2160 (4K) → 1920x1080, 2560×1440 (1440p) → 1920x1080, 2560×1080 (ultrawide) → fit within 1920x1080
-  - Combined with `--re-encode` flag
 - `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
 - `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
-- `--temp-dir PATH`: Temp directory for queue mode (default: system temp)
-- `--buffer-size N`: Number of files to buffer in queue mode (default: 4)
-- `--max-temp-size GB`: Max temp storage size in GB (default: 50)
-- `--clear-queue`: Clear queue state and temp files from previous queue mode session
 - `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
-
-## Usage Tips
-
-### Interrupting and Resuming Batch Encoding
-
-The encoder supports safe interruption and intelligent resume:
-
-**Safe to interrupt at any time:**
-- Press Ctrl+C to stop encoding
-- No corrupted files will be used (validation ensures integrity)
-- Partial encodes are automatically detected and removed
-
-**Automatic resume on restart:**
-```bash
-# Start batch encoding
-python video_sentinel.py /videos --re-encode --replace-original
-
-# Interrupt with Ctrl+C after some files complete
-
-# Resume - automatically skips completed files
-python video_sentinel.py /videos --re-encode --replace-original
-```
-
-**What happens on resume:**
-1. ✓ Detects valid `_reencoded` files from previous run
-2. ✓ Skips re-encoding those files (shows "Resuming: file.avi (already encoded)")
-3. ✓ Completes any interrupted replacements
-4. ✓ Continues encoding remaining files
-5. ✓ Validates all outputs before using them
-
-**Resume behavior examples:**
-- **Completed encode, not replaced:** Skips encoding, completes replacement
-- **Fully completed:** Shows "Replacement already completed, skipping"
-- **Partial/corrupted encode:** Deletes invalid file, re-encodes from scratch
-- **Never encoded:** Encodes normally
-
-This means you can safely interrupt large batch jobs and resume without wasting work!
-
-### Graceful Shutdown with Key Press
-
-For more controlled shutdown during batch encoding, VideoSentinel supports graceful shutdown by pressing the 'q' key:
-
-**How it works:**
-- Press the `q` key at any time during encoding
-- VideoSentinel will finish the current video, then stop
-- Progress is saved automatically (same as Ctrl+C)
-- Next run will resume from where you left off
-
-**Usage:**
-```bash
-# Start batch encoding
-python video_sentinel.py /videos --re-encode --replace-original
-
-# During encoding, press 'q' to stop gracefully
-# The current video will finish encoding, then the process stops
-```
-
-**Key differences from Ctrl+C:**
-- **Ctrl+C**: Immediate interrupt (may stop mid-encode, but safe due to validation)
-- **'q' key**: Graceful shutdown (finishes current video first)
-- Both are safe and support resume
-
-**When to use:**
-- Use `q` when you want to stop cleanly after the current video completes
-- Use Ctrl+C when you need to stop immediately
-
-**Important notes:**
-- The 'q' key listener works in both standard batch mode and queue mode
-- In queue mode, pressing 'q' will finish the current encoding, complete any pending uploads, and then exit
-- **tmux/screen users**: The 'q' key listener is automatically disabled when running inside tmux or screen to avoid terminal compatibility issues. Use Ctrl+C instead for graceful interruption.
-
-### Recovering Broken or Corrupted Videos
-
-VideoSentinel can attempt to recover broken videos using FFmpeg's error recovery mode. This is useful when:
-- Original files are corrupted and won't play properly
-- Videos fail to encode with standard settings
-- Files have broken timestamps or missing metadata
-- Perceptual hashing fails because frames can't be extracted
-
-**How error recovery works:**
-
-The `--recover` flag enables FFmpeg's error-tolerant flags:
-
-Input options (before `-i`):
-- `-err_detect ignore_err`: Ignores decoding errors and continues processing
-- `-fflags +genpts+discardcorrupt+igndts`: Generates missing timestamps, discards corrupted packets, ignores DTS errors
-- `-ignore_unknown`: Ignores unknown stream types
-
-Output options (after `-i`):
-- `-max_muxing_queue_size 1024`: Increases buffer for problematic files
-- `-max_error_rate 1.0`: Allows 100% error rate (doesn't fail on errors)
-
-**Usage:**
-```bash
-# Re-encode broken files with recovery mode
-python video_sentinel.py /path/to/broken_videos --check-specs --re-encode --recover
-
-# Combine with filename-based duplicates to clean up broken originals
-python video_sentinel.py /path/to/videos --filename-duplicates --duplicate-action auto-best --recover
-
-# Recover and replace originals
-python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --replace-original
-
-# Filter to specific broken file types
-python video_sentinel.py /path/to/videos --check-specs --re-encode --recover --file-types avi,wmv
-```
-
-**What recovery mode can fix:**
-- ✓ Videos with corrupted frames (skips bad frames)
-- ✓ Files with broken timestamps (regenerates them)
-- ✓ Videos missing metadata
-- ✓ Files that crash standard ffmpeg encoding
-- ✓ Partially downloaded or incomplete files
-
-**Recovery mode validation:**
-
-When `--recover` is enabled, output validation becomes more lenient:
-- Allows recovered files to have different durations than source (corrupted sources may have wrong metadata)
-- Allows files with missing duration metadata (common in heavily corrupted recoveries)
-- Still validates: file exists, has video stream, has valid dimensions, and is readable by ffprobe
-- This prevents false-negative validation failures for successfully recovered files
-
-**Limitations:**
-- Cannot recover completely unreadable files (0 bytes, wrong format, etc.)
-- May result in shorter duration if large portions are corrupted
-- Audio sync issues if significant corruption
-- Quality depends on how much of the file is recoverable
-
-**Best practices:**
-1. Try standard encoding first (`--re-encode` without `--recover`)
-2. Use `--recover` only for files that fail standard encoding
-3. Always validate recovered files play correctly before deleting originals
-4. Combine with `--filename-duplicates` to identify and keep best versions
-
-### Verbose Mode for Debugging
-
-The `-v` or `--verbose` flag enables detailed output for debugging encoding issues:
-
-**Normal mode (without `-v`):**
-```
-[1/5] Encoding: video.avi
-  Encoding: frame=1234 fps=45.2 time=00:01:23.45 speed=1.8x
-✓ [1/5] Completed: video.avi (avg 45.2 fps, 1.8x speed)
-```
-- Shows compact inline progress that overwrites the same line
-- Clean, minimal output
-
-**Verbose mode (with `-v`):**
-```
-[1/5] Encoding: video.avi
-  Output: video_reencoded.mp4
-  Command: ffmpeg -loglevel info -stats ...
-  Recovery mode enabled: using error-tolerant FFmpeg flags
-  [all FFmpeg output lines...]
-  frame=1234 fps=45 q=28.0 size=1024kB time=00:01:23.45 bitrate=1234.5kbits/s speed=1.8x
-  [more FFmpeg output...]
-✓ [1/5] Completed: video.avi
-```
-- Shows ALL FFmpeg output line-by-line
-- Each line creates a new line (no overwriting)
-- More detailed but scrolls more
-- Shows recovery mode warnings and errors
-- Useful for diagnosing why encoding fails
-
-**When to use verbose mode:**
-- Debugging encoding failures
-- Understanding what recovery mode is doing
-- Troubleshooting corrupted files
-- Seeing detailed FFmpeg warnings
-
-**When NOT to use verbose mode:**
-- Batch encoding many files (output is too verbose)
-- When you just want to see progress
-- Production/automated scripts
-
-### Network Queue Mode for Network Storage
-
-When encoding videos on network drives (NAS, SMB shares, etc.), network I/O significantly slows encoding. Queue mode solves this with a three-stage parallel pipeline:
-
-**How it works:**
-```
-Thread 1 (Download): Network → Local temp → [buffer] →
-Thread 2 (Encode):                          → [buffer] → Encoded local →
-Thread 3 (Upload):                                                      → Network
-```
-
-**Usage:**
-```bash
-# Basic queue mode
-python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode
-
-# With custom temp dir and limits
-python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode \
-  --temp-dir /Users/you/temp --buffer-size 3 --max-temp-size 100
-```
-
-**Key features:**
-- **Parallel operations**: Download next while encoding current while uploading previous
-- **Smart buffering**: Configurable (default 4 files) to balance speed and disk usage
-- **Storage monitoring**: Pauses downloads if temp storage exceeds limit
-- **Resume support**: Saves state to disk, handles Ctrl+C gracefully
-- **Network compatibility**: Falls back from `copy2` to `copy` for filesystems that don't support metadata
-
-**Performance:**
-- Traditional (network I/O): ~15-20 fps encoding
-- Queue mode (local SSD): ~45-60 fps encoding
-- **2-3x speed improvement!**
-
-**Architecture details:**
-- Download/upload use separate threads (I/O-bound, benefits from threading)
-- Encoding uses main thread (CPU-bound, no threading benefit)
-- Queue states: PENDING → DOWNLOADING → LOCAL → ENCODING → UPLOADING → COMPLETE
-- State persisted to JSON for resume capability
-
-**Failure handling in queue mode:**
-
-When an encode fails in queue mode (network_queue_manager.py:311-329):
-
-1. **Immediate actions:**
-   - File is marked with `FileState.FAILED`
-   - Error message is stored in the `error` field
-   - Temp files are cleaned up immediately (downloaded file deleted)
-   - State is saved to disk
-   - Original source file is never touched/deleted
-
-2. **Progress reporting:**
-   - Failed files are counted and displayed in the final summary
-   - Shows "Failed: X" in red at completion
-   - Does not count toward "Completed" count
-
-3. **Resume behavior (network_queue_manager.py:478-481):**
-   - Failed files are **NOT automatically retried** on resume
-   - Shown in resume summary as "Previously failed (skipped): X"
-   - Files remain in FAILED state across resume sessions
-   - Must be manually re-run if desired (remove from state or start fresh)
-
-4. **Common failure causes:**
-   - Encoding errors (corrupted source, unsupported codec)
-   - Disk space issues (temp storage full)
-   - FFmpeg crashes or timeouts
-   - Download failures (network issues)
-
-5. **Handling failed files:**
-   ```bash
-   # Option 1: Clear state and retry all files (including previously failed)
-   python video_sentinel.py --clear-queue
-   python video_sentinel.py /Volumes/NAS/videos --check-specs --re-encode --queue-mode
-
-   # Option 2: Process failed files individually without queue mode
-   # (Review error messages in logs to identify which files failed)
-   ```
-
-6. **Why failed files aren't automatically retried:**
-   - Prevents infinite retry loops on permanently corrupted files
-   - Allows user to inspect and fix issues before retrying
-   - Saves time by not repeatedly attempting impossible encodes
-   - State file provides a record of what failed for manual review
-
-**Safety guarantees:**
-- Failed encodes never delete or modify original source files
-- Temp files are cleaned up to avoid disk space waste
-- State is saved so you can review what failed
-- Can safely interrupt and resume without losing failure information
-
-**Monitoring queue status:**
-
-Queue state is persisted to disk for monitoring and resume support:
-
-1. **State file location** (network_queue_manager.py:92,119):
-   ```
-   Default: /tmp/videosentinel/queue_state.json
-   Custom:  <your-temp-dir>/queue_state.json
-   ```
-
-2. **Temp directory location**:
-   ```
-   Default: /tmp/videosentinel/
-   Custom:  <your-temp-dir>/
-   ```
-
-3. **State file contents (JSON)**:
-   - List of all files with their current state
-   - Error messages for failed files
-   - File paths (source, local temp, output, final destination)
-   - Can be inspected manually or with monitoring script
-
-4. **Temp directory contents**:
-   - `download_<filename>`: Downloaded files waiting to encode
-   - `encoded_<filename>.mp4`: Encoded files waiting to upload
-   - `queue_state.json`: State file
-   - **Note**: Temp files are automatically deleted when:
-     - Encoding fails (downloaded file cleaned up)
-     - Upload succeeds (both download and encoded files cleaned up)
-     - `--clear-queue` is run
-
-5. **Monitoring with included script**:
-   ```bash
-   # View queue status and progress
-   python monitor_queue.py
-
-   # Monitor queue with custom temp dir
-   python monitor_queue.py --temp-dir /Users/you/temp
-
-   # Show all files including completed
-   python monitor_queue.py --all
-
-   # Show only failed files
-   python monitor_queue.py --failed-only
-   ```
-
-   The monitor shows:
-   - Queue summary (pending, downloading, encoding, uploading, complete, failed counts)
-   - Progress percentage
-   - Failed files with error messages
-   - Temp directory size and contents
-   - Detailed file-by-file status
-
-6. **Manual state file inspection**:
-   ```bash
-   # View the raw state file
-   cat /tmp/videosentinel/queue_state.json | python -m json.tool
-
-   # Check temp directory size
-   du -sh /tmp/videosentinel/
-
-   # List temp files
-   ls -lh /tmp/videosentinel/
-   ```
-
-### Managing Duplicate Videos
-
-VideoSentinel can automatically manage duplicates with `--duplicate-action`:
-
-**Three modes:**
-
-1. **report** (default) - Just list duplicates, no action
-2. **auto-best** - Automatically keep highest quality, delete others
-3. **interactive** - Ask for each duplicate group
-
-**Quality ranking algorithm** (video_sentinel.py:54-83):
-```python
-def rank_video_quality(video_path: Path, video_info: VideoInfo) -> int:
-    score = 0
-
-    # Codec scoring (modern codecs better)
-    codec_scores = {
-        'av1': 1000, 'vp9': 900, 'hevc': 800, 'h264': 400,
-        'mpeg4': 200, 'mpeg2': 100, 'wmv': 50
-    }
-    score += codec_scores.get(codec_info.codec.lower(), 0)
-
-    # Resolution scoring
-    score += video_info.width * video_info.height // 1000
-
-    # Bitrate scoring
-    score += video_info.bitrate // 10000
-
-    return score
-```
-
-**Usage examples:**
-```bash
-# Auto-best: automatically keep best, delete others (asks for confirmation)
-python video_sentinel.py ~/Videos --find-duplicates --duplicate-action auto-best
-
-# Interactive: shows ranked list, lets you choose per group
-python video_sentinel.py ~/Videos --find-duplicates --duplicate-action interactive
-```
-
-**Safety features:**
-- Auto-best mode asks "Delete N files? (yes/no)" before deleting
-- Interactive mode confirms choice for each group
-- Shows space freed after deletion
-- Handles deletion errors gracefully
-
-**Implementation location:**
-- Ranking logic: `video_sentinel.py:54-83`
-- Handler function: `video_sentinel.py:86-179`
-- Integration: `video_sentinel.py:530-622`
-
-### Fixing QuickLook Compatibility
-
-VideoSentinel can automatically fix macOS QuickLook/Finder preview issues for videos that are already properly encoded (HEVC/H.264) but won't preview.
-
-**Common QuickLook issues:**
-1. **Wrong container**: MKV instead of MP4 (QuickLook requires MP4)
-2. **Wrong HEVC tag**: hev1 instead of hvc1 (Apple devices need hvc1)
-3. **Wrong pixel format**: yuv422p instead of yuv420p (compatibility issue)
-4. **Missing faststart**: Metadata at end of file (prevents instant preview)
-
-**Two-tier fixing approach:**
-
-**1. Fast remux (no re-encoding)** - Takes seconds, not minutes:
-- Changes container from MKV to MP4 using `ffmpeg -c copy`
-- Fixes HEVC tag with `-tag:v hvc1`
-- Adds `-movflags faststart` for instant preview
-- No quality loss (just container change)
-
-**2. Full re-encode** - Only when necessary:
-- Wrong pixel format requires re-encoding with `-pix_fmt yuv420p`
-- Uses same smart quality matching as regular re-encoding
-
-**Usage:**
-```bash
-# Check what needs fixing
-python video_sentinel.py /Videos --check-specs --fix-quicklook
-
-# Fix and replace originals
-python video_sentinel.py /Videos --check-specs --fix-quicklook --replace-original
-
-# Works with queue mode for network storage
-python video_sentinel.py /Volumes/NAS/videos --check-specs --fix-quicklook --queue-mode --replace-original
-```
-
-**Implementation details:**
-- Compatibility check: `video_analyzer.py:200-283` (`check_quicklook_compatibility()`)
-- Fast remux: `encoder.py:703-779` (`remux_to_mp4()`)
-- Integration: `video_sentinel.py:699-909` (includes queue mode support)
-
-**Smart Resume Support:**
-- Automatically checks for existing `_quicklook` or `_reencoded` files before processing
-- Validates existing outputs (size, format, duration)
-- Skips files with valid outputs to avoid re-processing
-- Safe to interrupt (Ctrl+C) and resume - picks up where it left off
-- Works with both direct mode and queue mode
-
-**Why this is useful:**
-- Many HEVC videos in MKV containers won't preview in Finder
-- Re-encoding would take hours, remuxing takes seconds
-- Ensures entire library works with QuickLook/spacebar preview
-- Resume capability saves time on large batch jobs
-
-### Filtering by File Type
-
-The `--file-types` flag filters files at the discovery stage for maximum efficiency:
-
-**How it works:**
-- Filters files when scanning the directory (before any analysis)
-- Only matching files are loaded, checked, analyzed, and processed
-- Applies to all operations: spec checking, duplicate detection, issue detection, re-encoding
-- More efficient than loading all files then filtering later
-
-**Usage examples:**
-```bash
-# Only process WMV and AVI files for re-encoding
-python video_sentinel.py /videos --check-specs --re-encode --file-types wmv,avi
-
-# Find duplicates only among MOV files
-python video_sentinel.py /videos --find-duplicates --file-types mov
-
-# Check issues only for legacy FLV files
-python video_sentinel.py /videos --check-issues --file-types flv
-
-# Combine with other flags
-python video_sentinel.py /videos --check-specs --re-encode --file-types wmv,avi,mov \
-  --replace-original --queue-mode
-```
-
-**Benefits:**
-- **Faster scanning**: Only searches for specified file types
-- **Less memory**: Doesn't load unnecessary files into memory
-- **Cleaner output**: Only shows results for files you care about
-- **Targeted operations**: Perfect for cleaning up legacy format collections
-
-**Implementation details:**
-- File type parsing: `video_sentinel.py:417-424`
-- Filter application: `video_analyzer.py:313-358` (`find_videos()` method)
-- Supports any extension: wmv, avi, mov, mkv, mp4, flv, webm, m4v, mpg, mpeg
 
 ## Common Development Patterns
 
@@ -917,7 +310,9 @@ Adjust in `DuplicateDetector.__init__()` (duplicate_detector.py:17):
 - `num_samples`: More frames = more accurate but slower
 - `hash_size`: Larger = more granular but slower
 
-## External System Dependencies
+## Dependencies
+
+### External System Dependencies
 
 **FFmpeg must be installed:**
 - macOS: `brew install ffmpeg`
@@ -925,3 +320,29 @@ Adjust in `DuplicateDetector.__init__()` (duplicate_detector.py:17):
 - Windows: `choco install ffmpeg`
 
 The application checks for FFmpeg availability at startup (video_sentinel.py:110-114) and exits if not found.
+
+### Python Dependencies
+
+All video operations depend on **FFmpeg** being installed:
+- `ffprobe`: Metadata extraction and validation
+- `ffmpeg`: Re-encoding and integrity checks
+
+Python dependencies (requirements.txt):
+- **opencv-python**: Frame extraction from videos
+- **imagehash**: Perceptual hashing (phash algorithm)
+- **Pillow**: Image processing for hashing
+- **ffmpeg-python**: FFmpeg wrapper utilities
+- **tqdm**: Progress bars for CLI
+
+## Testing Individual Modules
+
+```bash
+# Test video analysis
+python -c "from video_analyzer import VideoAnalyzer; from pathlib import Path; a = VideoAnalyzer(verbose=True); print(a.get_video_info(Path('test.mp4')))"
+
+# Test duplicate detection
+python -c "from duplicate_detector import DuplicateDetector; from pathlib import Path; d = DuplicateDetector(verbose=True); print(d.get_similarity_score(Path('video1.mp4'), Path('video2.mp4')))"
+
+# Test encoding
+python -c "from encoder import VideoEncoder; from pathlib import Path; e = VideoEncoder(verbose=True); e.re_encode_video(Path('input.mp4'), Path('output.mp4'))"
+```

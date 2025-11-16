@@ -368,6 +368,12 @@ def main():
     )
 
     parser.add_argument(
+        '--max-files',
+        type=int,
+        help='Maximum number of files to process in this run (stops searching after N files found)'
+    )
+
+    parser.add_argument(
         '--replace-original',
         action='store_true',
         help='Replace original files with re-encoded versions (deletes source, renames output)'
@@ -521,6 +527,11 @@ def main():
             recursive=args.recursive,
             file_types=file_types_filter
         )
+
+    # Apply max files limit if specified
+    if args.max_files and len(video_files) > args.max_files:
+        print(f"Limiting to first {args.max_files} files (found {len(video_files)} total)")
+        video_files = video_files[:args.max_files]
 
     if not video_files:
         if file_types_filter:
