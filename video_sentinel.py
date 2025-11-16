@@ -573,6 +573,13 @@ def main():
                 tqdm.write(f"    Resolution: {video_info.width}x{video_info.height}")
                 tqdm.write(f"    Container: {video_info.container}")
 
+                # Early exit: if re-encoding with max-files, stop once we have enough non-compliant videos
+                # We use a 2x buffer since some might have existing outputs
+                if args.re_encode and args.max_files and len(non_compliant_videos) >= args.max_files * 2:
+                    print()
+                    print(f"Found {len(non_compliant_videos)} non-compliant videos (enough for --max-files {args.max_files}), stopping analysis")
+                    break
+
         print()
         print(f"Summary: {Colors.green(f'{len(compliant_videos)} compliant')}, {Colors.red(f'{len(non_compliant_videos)} non-compliant')}")
         print()

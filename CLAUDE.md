@@ -267,11 +267,11 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - Filters files at discovery stage (applies to all operations)
   - More efficient than scanning all files then filtering later
 - `--max-files N`: Limit processing to first N files found (e.g., `--max-files 100`)
-  - **Smart re-encoding**: With `--re-encode`, keeps searching until N files needing encoding are found (skips already-encoded files)
+  - **Smart re-encoding**: With `--re-encode`, stops analyzing early once enough non-compliant files are found (2x buffer), then filters to N files needing encoding
   - **Standard mode**: For other operations, limits to first N files discovered
-  - Perfect for manageable batches, testing, or incremental processing
+  - Perfect for manageable batches, testing, or incremental processing on large libraries
   - Respects `--file-types` and `--recursive` flags
-  - Implementation: `video_sentinel.py:370-374` (argument), `video_sentinel.py:533-535` (standard), `video_sentinel.py:611-615` (smart re-encode)
+  - Implementation: `video_sentinel.py:370-374` (argument), `video_sentinel.py:533-535` (standard), `video_sentinel.py:576-581` (early exit), `video_sentinel.py:617-621` (final limit)
 - `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
   - Matches files with same name ignoring extension and `_reencoded`/`_quicklook` suffixes
   - Useful when original files are broken and can't generate perceptual hashes

@@ -655,10 +655,11 @@ The `--max-files` flag limits the maximum number of files to process in a single
 ### How It Works
 
 **Smart Filtering for Re-encoding** (with `--re-encode`):
-- Keeps searching through files until it finds N files that **actually need encoding**
+- Stops analyzing once it finds enough files that **actually need encoding**
 - Skips files that are already compliant or have existing valid outputs
-- Stops once N files needing encoding are found
-- Example: With `--max-files 100`, if first 50 files are already encoded, it keeps searching until it finds 100 files that need encoding
+- Uses 2x buffer during analysis (stops at 200 non-compliant to ensure 100 needing encoding)
+- Then filters to exactly N files that need encoding
+- Example: With `--max-files 100`, stops analyzing after finding ~200 non-compliant files, then processes the first 100 that need encoding
 
 **Standard Filtering** (for other operations):
 - Files are discovered normally (respects `--file-types` and `--recursive` flags)
@@ -723,5 +724,6 @@ python video_sentinel.py /videos --check-specs --re-encode --replace-original
 
 - Argument parsing: `video_sentinel.py:370-374`
 - Standard limit (duplicates, issues): `video_sentinel.py:533-535` (applied after discovery)
-- Smart re-encode limit: `video_sentinel.py:611-615` (applied after filtering to files needing encoding)
-- For re-encoding: Stops searching once N files needing encoding are found, even if more files exist
+- Smart re-encode early exit: `video_sentinel.py:576-581` (stops analysis at 2x max-files non-compliant)
+- Smart re-encode final limit: `video_sentinel.py:617-621` (exact N files needing encoding)
+- For re-encoding: Two-stage optimization minimizes analysis time on large libraries
