@@ -408,7 +408,10 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - Combined with `--re-encode` flag
 - `--downscale-1080p`: Downscale videos larger than 1080p during re-encoding
   - Limits maximum resolution to 1920x1080 while preserving aspect ratio
-  - Uses FFmpeg scale filter: `scale=1920:1080:force_original_aspect_ratio=decrease`
+  - Uses two-stage FFmpeg scale filter for proper dimension handling:
+    - Stage 1: `scale=1920:1080:force_original_aspect_ratio=decrease` - fit within 1920x1080
+    - Stage 2: `scale=trunc(iw/2)*2:trunc(ih/2)*2` - ensure dimensions divisible by 2
+  - The two-stage approach prevents "Cannot open libx265 encoder" errors from odd dimensions
   - Only scales down, never upscales (videos ≤1080p are unchanged)
   - Automatically handles different aspect ratios (16:9, 21:9, 4:3, etc.)
   - Useful for reducing file size and storage requirements

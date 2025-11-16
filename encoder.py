@@ -376,15 +376,15 @@ class VideoEncoder:
                 # Check if video is larger than 1080p (either dimension exceeds 1920x1080)
                 if video_info.width > 1920 or video_info.height > 1080:
                     # Insert scale filter before output path
-                    # scale=1920:1080:force_original_aspect_ratio=decrease ensures:
-                    # - Video fits within 1920x1080 box
-                    # - Aspect ratio is preserved
-                    # - Video is only scaled down, never up
+                    # Two-stage scaling ensures dimensions are divisible by 2 (required by HEVC/x265):
+                    # 1. scale=1920:1080:force_original_aspect_ratio=decrease - fit within box
+                    # 2. scale=trunc(iw/2)*2:trunc(ih/2)*2 - round to even dimensions
+                    # This prevents "Cannot open libx265 encoder" errors from odd dimensions
                     cmd.insert(-1, '-vf')
-                    cmd.insert(-1, 'scale=1920:1080:force_original_aspect_ratio=decrease')
+                    cmd.insert(-1, 'scale=1920:1080:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2')
 
                     if self.verbose:
-                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080")
+                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080 (ensuring even dimensions)")
 
             # Add codec-specific parameters
             if target_codec.lower() == 'hevc':
