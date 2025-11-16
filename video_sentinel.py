@@ -108,17 +108,19 @@ def rank_video_quality(video_path: Path, video_info: VideoInfo, analyzer: VideoA
     normalized_bitrate = video_info.bitrate * efficiency
     score += int(normalized_bitrate // 10000)
 
+    # Newly processed file bonus (HIGHEST PRIORITY - always prefer over originals)
+    # Files with _quicklook or _reencoded suffixes are newly processed
+    # This bonus is intentionally VERY high to ensure newly processed files
+    # always beat originals, even if original is 4K and new file is 1080p
+    stem_lower = video_path.stem.lower()
+    if '_quicklook' in stem_lower or '_reencoded' in stem_lower:
+        score += 50000  # Massive bonus to heavily favor newly processed files
+
     # QuickLook compatibility bonus (significant advantage for macOS users)
     if analyzer:
         compat = analyzer.check_quicklook_compatibility(video_path)
         if compat.get('compatible'):
-            score += 1500  # Big bonus for QuickLook compatible files
-
-    # Newly processed file bonus (prefer recently encoded/remuxed files)
-    # Files with _quicklook or _reencoded suffixes are newly processed
-    stem_lower = video_path.stem.lower()
-    if '_quicklook' in stem_lower or '_reencoded' in stem_lower:
-        score += 1000  # Bonus for newly processed files
+            score += 5000  # Big bonus for QuickLook compatible files
 
     # Container preference (MP4 > MKV > others for compatibility)
     container_bonus = {

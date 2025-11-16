@@ -363,8 +363,11 @@ After deleting duplicates (auto-best or interactive mode):
 Duplicate quality ranking uses comprehensive scoring to prioritize the best file:
 
 **Ranking factors (in priority order):**
-1. **QuickLook compatibility**: +1500 points for macOS QuickLook/Finder preview compatibility
-2. **Newly processed files**: +1000 points for files with `_quicklook` or `_reencoded` suffixes
+1. **Newly processed files (HIGHEST PRIORITY)**: +50,000 points for files with `_quicklook` or `_reencoded` suffixes
+   - Massive bonus ensures newly processed files ALWAYS beat originals
+   - Even 1080p re-encode beats 4K original (intentional design)
+   - Prevents accidentally deleting your explicitly created files
+2. **QuickLook compatibility**: +5,000 points for macOS QuickLook/Finder preview compatibility
 3. **Container format**: MP4/M4V (+300), MKV/WebM (+100), others (0)
 4. **Codec modernity**: AV1 (1000), VP9 (900), HEVC/HVC1 (800), H.264 (400), MPEG4 (200), MPEG2/WMV (50-100)
 5. **Resolution**: Width × height / 1000
@@ -378,11 +381,13 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
 - MPEG2/WMV: 0.4-0.5× (much less efficient)
 
 **Why this works:**
-- Ensures QuickLook-compatible files are always preferred (critical for macOS users)
-- Newly processed files rank higher than originals (avoids deleting fresh encodes)
+- **Newly processed files get absolute priority** - the +50,000 bonus is intentionally massive to ensure your explicitly created files (downscaled, re-encoded, remuxed) are never accidentally deleted in favor of originals
+- QuickLook-compatible files strongly preferred (critical for macOS users)
 - MP4 container preferred over MKV for universal compatibility
 - Modern codec re-encodes rank higher than originals even at lower bitrate
-- Example: `movie_quicklook.mp4` (HVC1, 3000 kbps, MP4) beats `movie.mkv` (HEVC, 3500 kbps, MKV)
+- Examples:
+  - `movie_reencoded.mp4` (1080p, 3000 kbps) beats `movie.mkv` (4K, 10000 kbps) ← intentional!
+  - `movie_quicklook.mp4` (HVC1, 3000 kbps, MP4) beats `movie.mkv` (HEVC, 3500 kbps, MKV)
 
 **CLI Flags for New Features**
 - `--file-types TYPES`: Comma-separated file extensions to process (e.g., `wmv,avi,mov`)

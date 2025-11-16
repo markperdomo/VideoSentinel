@@ -1075,12 +1075,22 @@ python video_sentinel.py ~/Videos --find-duplicates --duplicate-action auto-best
 ```
 
 **How auto-best ranks quality:**
-- **QuickLook compatibility**: +1500 points for macOS QuickLook/Finder preview compatibility
-- **Newly processed files**: +1000 points for files with `_quicklook` or `_reencoded` suffixes
+- **Newly processed files (HIGHEST PRIORITY)**: +50,000 points for files with `_quicklook` or `_reencoded` suffixes - ensures newly processed files are always kept, even if original is higher resolution
+- **QuickLook compatibility**: +5,000 points for macOS QuickLook/Finder preview compatibility
 - **Container format**: MP4/M4V (+300) > MKV/WebM (+100) > others
 - **Codec modernity**: AV1 > VP9 > HEVC > H.264 > older codecs
 - **Resolution**: Higher resolution scores higher
 - **Bitrate (normalized by codec efficiency)**: Modern codecs need less bitrate for equivalent quality
+
+**Why newly processed files get massive priority:**
+
+The +50,000 point bonus for `_reencoded` and `_quicklook` files ensures they're **always** preferred over originals, regardless of resolution or bitrate differences. This is intentional because:
+- ✅ You intentionally created these files (they represent your desired output)
+- ✅ They're optimized (modern codecs, QuickLook compatibility, proper settings)
+- ✅ A 1080p re-encode should beat a 4K original when you've explicitly downscaled
+- ✅ Prevents accidentally deleting your newly processed files in favor of old originals
+
+**Example:** A 1080p HEVC `movie_reencoded.mp4` (3000 kbps) will always beat a 4K original `movie.mkv` (10000 kbps) because you intentionally created the re-encoded version.
 
 **Codec Efficiency Normalization:**
 
