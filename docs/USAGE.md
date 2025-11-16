@@ -654,10 +654,18 @@ The `--max-files` flag limits the maximum number of files to process in a single
 
 ### How It Works
 
+**Smart Filtering for Re-encoding** (with `--re-encode`):
+- Keeps searching through files until it finds N files that **actually need encoding**
+- Skips files that are already compliant or have existing valid outputs
+- Stops once N files needing encoding are found
+- Example: With `--max-files 100`, if first 50 files are already encoded, it keeps searching until it finds 100 files that need encoding
+
+**Standard Filtering** (for other operations):
 - Files are discovered normally (respects `--file-types` and `--recursive` flags)
-- After discovery, the list is limited to the first N files
+- Limits to the first N files found
 - Processing proceeds normally with all other flags
-- Perfect for testing, incremental processing, or managing system resources
+
+Perfect for testing, incremental processing, or managing system resources
 
 ### Usage Examples
 
@@ -685,6 +693,7 @@ python video_sentinel.py /Volumes/NAS/videos --check-specs --re-encode --queue-m
 - **Testing**: Quickly test settings on a small subset before processing everything
 - **Incremental progress**: Run multiple times to gradually process entire library
 - **Predictable runtime**: Know approximately how long a run will take
+- **Smart re-encoding**: When used with `--re-encode`, automatically finds N files that need work (skips already-encoded files)
 
 ### Workflow Tips
 
@@ -713,5 +722,6 @@ python video_sentinel.py /videos --check-specs --re-encode --replace-original
 ### Implementation Details
 
 - Argument parsing: `video_sentinel.py:370-374`
-- Limit application: `video_sentinel.py:531-534`
-- Applied after file discovery but before any processing begins
+- Standard limit (duplicates, issues): `video_sentinel.py:533-535` (applied after discovery)
+- Smart re-encode limit: `video_sentinel.py:611-615` (applied after filtering to files needing encoding)
+- For re-encoding: Stops searching once N files needing encoding are found, even if more files exist

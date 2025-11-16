@@ -528,8 +528,9 @@ def main():
             file_types=file_types_filter
         )
 
-    # Apply max files limit if specified
-    if args.max_files and len(video_files) > args.max_files:
+    # Note: For re-encoding operations, max-files limit is applied AFTER filtering
+    # to files that need encoding (smarter behavior). For other operations, apply it here.
+    if args.max_files and not args.re_encode and len(video_files) > args.max_files:
         print(f"Limiting to first {args.max_files} files (found {len(video_files)} total)")
         video_files = video_files[:args.max_files]
 
@@ -606,6 +607,12 @@ def main():
                     tqdm.write(Colors.green(f"✓ {video_path.name}: Already has valid output ({existing_output.name})"))
                 else:
                     videos_needing_encode.append((video_path, video_info))
+
+                    # Apply max-files limit smartly: stop once we have enough files that need encoding
+                    if args.max_files and len(videos_needing_encode) >= args.max_files:
+                        print()
+                        print(f"Reached limit of {args.max_files} files needing encoding (checked {len(videos_already_encoded) + len(videos_needing_encode)} total)")
+                        break
 
             print()
             if videos_already_encoded:
