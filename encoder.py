@@ -367,6 +367,16 @@ class VideoEncoder:
                 '-preset', preset,
                 '-crf', str(crf),
                 '-c:a', audio_codec,
+            ])
+
+            # Add audio filter to handle problematic channel layouts
+            # This fixes issues like "Unsupported channel layout '6 channels'"
+            # Try to map to 5.1, 5.1(side), or fall back to stereo
+            if self.recovery_mode:
+                cmd.extend(['-af', 'aformat=channel_layouts=5.1|5.1(side)|stereo'])
+
+            # Add final flags
+            cmd.extend([
                 '-y',  # Overwrite output file if exists
                 str(output_path)
             ])
