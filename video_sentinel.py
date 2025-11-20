@@ -503,7 +503,9 @@ def main():
     print()
 
     # Initialize components
-    analyzer = VideoAnalyzer(verbose=args.verbose)
+    # If downscale_1080p enabled, mark videos >1080p as non-compliant
+    max_resolution = (1920, 1080) if args.downscale_1080p else None
+    analyzer = VideoAnalyzer(verbose=args.verbose, max_resolution=max_resolution)
     duplicate_detector = DuplicateDetector(verbose=args.verbose)
     issue_detector = IssueDetector(verbose=args.verbose)
 
@@ -569,8 +571,26 @@ def main():
             else:
                 non_compliant_videos.append((video_path, video_info))
                 tqdm.write(Colors.red(f"✗ {video_path.name}"))
-                tqdm.write(f"    Codec: {Colors.red(video_info.codec.upper())} (should be {Colors.green('H.265/HEVC')}, {Colors.green('AV1')}, or {Colors.green('VP9')})")
-                tqdm.write(f"    Resolution: {video_info.width}x{video_info.height}")
+
+                # Show specific reasons for non-compliance
+                codec_lower = video_info.codec.lower()
+                codec_compliant = codec_lower in analyzer.MODERN_CODECS
+                resolution_compliant = True
+
+                if analyzer.max_resolution is not None:
+                    max_width, max_height = analyzer.max_resolution
+                    resolution_compliant = video_info.width <= max_width and video_info.height <= max_height
+
+                if not codec_compliant:
+                    tqdm.write(f"    Codec: {Colors.red(video_info.codec.upper())} (should be {Colors.green('H.265/HEVC')}, {Colors.green('AV1')}, or {Colors.green('VP9')})")
+                else:
+                    tqdm.write(f"    Codec: {Colors.green(video_info.codec.upper())}")
+
+                if not resolution_compliant:
+                    tqdm.write(f"    Resolution: {Colors.red(f'{video_info.width}x{video_info.height}')} (exceeds max {max_width}x{max_height})")
+                else:
+                    tqdm.write(f"    Resolution: {video_info.width}x{video_info.height}")
+
                 tqdm.write(f"    Container: {video_info.container}")
 
                 # Early exit: if re-encoding with max-files, stop once we have enough non-compliant videos

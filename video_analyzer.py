@@ -61,8 +61,18 @@ class VideoAnalyzer:
     MODERN_CODECS = {'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
     ACCEPTABLE_CODECS = {'h264', 'avc', 'avc1', 'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, max_resolution: Optional[tuple] = None):
+        """
+        Initialize VideoAnalyzer
+
+        Args:
+            verbose: Enable verbose output
+            max_resolution: Optional (width, height) tuple for maximum acceptable resolution.
+                          Videos exceeding this will be marked as non-compliant.
+                          E.g., (1920, 1080) for 1080p maximum.
+        """
         self.verbose = verbose
+        self.max_resolution = max_resolution
 
     def is_video_file(self, file_path: Path) -> bool:
         """Check if file is a video based on extension"""
@@ -330,6 +340,13 @@ class VideoAnalyzer:
         # Video should have valid dimensions
         if video_info.width == 0 or video_info.height == 0:
             return False
+
+        # Check maximum resolution if configured
+        if self.max_resolution is not None:
+            max_width, max_height = self.max_resolution
+            # Video exceeds max resolution if either dimension is larger
+            if video_info.width > max_width or video_info.height > max_height:
+                return False
 
         return True
 
