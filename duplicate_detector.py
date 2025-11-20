@@ -277,7 +277,13 @@ class DuplicateDetector:
 
         return self._compare_video_hashes(hashes1, hashes2)
 
-    def find_duplicates_by_filename(self, video_paths: List[Path]) -> Dict[str, List[Path]]:
+    def find_duplicates_by_filename(
+        self,
+        video_paths: List[Path],
+        analyzer=None,
+        check_duration: bool = True,
+        duration_tolerance: float = 2.0
+    ) -> Dict[str, List[Path]]:
         """
         Find duplicate videos based on filename matching (ignoring extension and common suffixes)
 
@@ -288,6 +294,9 @@ class DuplicateDetector:
 
         Args:
             video_paths: List of video file paths
+            analyzer: Optional VideoAnalyzer instance for duration checking
+            check_duration: If True and analyzer provided, verify durations match (default: True)
+            duration_tolerance: Maximum duration difference in seconds (default: 2.0)
 
         Returns:
             Dictionary mapping group IDs to lists of duplicate video paths
@@ -315,13 +324,63 @@ class DuplicateDetector:
         # Convert to duplicate groups format (only groups with 2+ files)
         duplicate_groups: Dict[str, List[Path]] = {}
         group_id = 0
+        filtered_count = 0
 
         for normalized_name, videos in filename_groups.items():
             if len(videos) > 1:
-                duplicate_groups[f"group_{group_id}"] = videos
-                group_id += 1
+                # If duration checking enabled and analyzer available, filter by duration
+                if check_duration and analyzer is not None:
+                    # Get video info for all files in group
+                    video_info_map = {}
+                    for video in videos:
+                        info = analyzer.get_video_info(video)
+                        if info and info.duration > 0:
+                            video_info_map[video] = info
+
+                    # Group videos by similar duration
+                    duration_groups = []
+                    processed = set()
+
+                    for video1, info1 in video_info_map.items():
+                        if video1 in processed:
+                            continue
+
+                        # Start a new duration-based subgroup
+                        duration_group = [video1]
+                        processed.add(video1)
+
+                        # Find other videos with similar duration
+                        for video2, info2 in video_info_map.items():
+                            if video2 in processed:
+                                continue
+
+                            duration_diff = abs(info1.duration - info2.duration)
+                            if duration_diff <= duration_tolerance:
+                                duration_group.append(video2)
+                                processed.add(video2)
+
+                        # Only keep groups with 2+ videos
+                        if len(duration_group) > 1:
+                            duration_groups.append(duration_group)
+
+                    # Add each duration-based subgroup as a separate duplicate group
+                    for duration_group in duration_groups:
+                        duplicate_groups[f"group_{group_id}"] = duration_group
+                        group_id += 1
+
+                    # Track how many filename matches were filtered out by duration check
+                    if len(duration_groups) == 0 and len(videos) > 1:
+                        filtered_count += 1
+                        if self.verbose:
+                            tqdm.write(f"Filtered out '{normalized_name}': files have different durations")
+                else:
+                    # No duration checking, add all files with matching filenames
+                    duplicate_groups[f"group_{group_id}"] = videos
+                    group_id += 1
 
         if self.verbose:
             tqdm.write(f"Found {len(duplicate_groups)} filename-based duplicate groups")
+            if check_duration and analyzer is not None and filtered_count > 0:
+                tqdm.write(f"Filtered out {filtered_count} groups due to duration mismatch")
 
         return duplicate_groups

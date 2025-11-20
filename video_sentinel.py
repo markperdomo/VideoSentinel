@@ -1027,7 +1027,7 @@ def main():
 
         # Use filename-based detection if requested, otherwise use perceptual hashing
         if args.filename_duplicates:
-            duplicate_groups = duplicate_detector.find_duplicates_by_filename(video_files)
+            duplicate_groups = duplicate_detector.find_duplicates_by_filename(video_files, analyzer=analyzer)
         else:
             duplicate_groups = duplicate_detector.find_duplicates(video_files)
 
