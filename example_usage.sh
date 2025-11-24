@@ -33,3 +33,6 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode --target-code
 
 # Full scan: check everything recursively
 python video_sentinel.py /path/to/videos -r --check-specs --check-issues --find-duplicates -v
+
+# Process only files matching a wildcard pattern (e.g. all .mkv files in a directory)
+python video_sentinel.py /path/to/videos/*.mkv --check-specs

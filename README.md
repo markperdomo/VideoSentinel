@@ -74,6 +74,9 @@ python video_sentinel.py /path/to/broken_videos --check-specs --re-encode --reco
 
 # Process only specific file types
 python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
+
+# Process files matching a wildcard pattern (e.g., all MKV files)
+python video_sentinel.py /path/to/videos/*.mkv --check-specs
 ```
 
 For comprehensive usage examples and detailed documentation, see [docs/USAGE.md](docs/USAGE.md).
