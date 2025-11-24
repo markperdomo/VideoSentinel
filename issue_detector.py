@@ -60,7 +60,7 @@ class IssueDetector:
                 for line in error_lines:
                     line_lower = line.lower()
 
-                    if 'corrupt' in line_lower or 'error' in line_lower:
+                    if 'corrupt' in line_lower or 'error' in line_lower or 'invalid nal unit size' in line_lower:
                         issues.append(VideoIssue(
                             file_path=video_path,
                             issue_type='corruption',

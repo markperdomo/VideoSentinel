@@ -275,10 +275,10 @@ def main():
     )
 
     parser.add_argument(
-        'path',
+        'paths',
         type=Path,
-        nargs='?',
-        help='Video file or directory to analyze (not required for --clear-queue)'
+        nargs='*',
+        help='Video files or directories to analyze (not required for --clear-queue)'
     )
 
     parser.add_argument(
@@ -452,22 +452,19 @@ def main():
         print("="*80)
         sys.exit(0)
 
-    # Validate input path (required unless using --clear-queue)
-    if not args.path:
-        print(f"Error: Path argument is required (provide a video file or directory)", file=sys.stderr)
+    # Validate input paths (required unless using --clear-queue)
+    if not args.paths and not args.clear_queue:
+        print(f"Error: Path argument is required (provide one or more video files or directories)", file=sys.stderr)
+        parser.print_help()
         sys.exit(1)
 
-    if not args.path.exists():
-        print(f"Error: Path '{args.path}' does not exist", file=sys.stderr)
-        sys.exit(1)
-
-    # Check if path is a file or directory
-    is_single_file = args.path.is_file()
-    is_directory = args.path.is_dir()
-
-    if not is_single_file and not is_directory:
-        print(f"Error: '{args.path}' is not a file or directory", file=sys.stderr)
-        sys.exit(1)
+    for path in args.paths:
+        if not path.exists():
+            print(f"Error: Path '{path}' does not exist", file=sys.stderr)
+            sys.exit(1)
+        if not path.is_file() and not path.is_dir():
+            print(f"Error: '{path}' is not a valid file or directory", file=sys.stderr)
+            sys.exit(1)
 
     # If re-encode is specified, automatically enable check-specs (required for re-encoding)
     if args.re_encode and not args.check_specs:
@@ -493,11 +490,13 @@ def main():
     print("="*80)
     print(f"VideoSentinel - Video Library Manager")
     print("="*80)
-    if is_single_file:
-        print(f"Processing file: {args.path}")
-    else:
-        print(f"Scanning directory: {args.path}")
+
+    if args.paths:
+        print(f"Processing {len(args.paths)} paths:")
+        for path in args.paths:
+            print(f"  - {path}")
         print(f"Recursive scan: {args.recursive}")
+    
     print(f"Target codec: {args.target_codec.upper()}")
     print("="*80)
     print()
@@ -518,17 +517,23 @@ def main():
         ]
         print(f"File type filter: {', '.join(file_types_filter).upper()}")
 
-    # Find all video files (or use single file)
-    if is_single_file:
-        print(f"Processing single file: {args.path.name}")
-        video_files = [args.path]
-    else:
+    # Find all video files from the provided paths
+    video_files = []
+    if args.paths:
         print("Finding video files...")
-        video_files = analyzer.find_videos(
-            args.path,
-            recursive=args.recursive,
-            file_types=file_types_filter
-        )
+        for path in args.paths:
+            if path.is_file():
+                if path.suffix.lower() in analyzer.VIDEO_EXTENSIONS:
+                    video_files.append(path)
+                else:
+                    if args.verbose:
+                        print(f"Skipping non-video file: {path}")
+            elif path.is_dir():
+                video_files.extend(analyzer.find_videos(
+                    path,
+                    recursive=args.recursive,
+                    file_types=file_types_filter
+                ))
 
     # Note: For re-encoding operations, max-files limit is applied AFTER filtering
     # to files that need encoding (smarter behavior). For other operations, apply it here.
