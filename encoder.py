@@ -356,10 +356,21 @@ class VideoEncoder:
 
             # Add OUTPUT recovery flags (AFTER -i)
             if self.recovery_mode:
-                # Increase muxing queue size for problematic files
-                cmd.extend(['-max_muxing_queue_size', '1024'])
+                # Dynamic memory settings based on file size to balance performance and memory
+                # Large files (>10GB): Use conservative settings to avoid OOM on remote servers
+                # Small files (<10GB): Use aggressive settings for maximum performance
+                file_size_gb = input_path.stat().st_size / (1024**3)
+                is_large_file = file_size_gb > 10
+
+                # Set muxing queue size
+                max_queue_size = '512' if is_large_file else '1024'
+                cmd.extend(['-max_muxing_queue_size', max_queue_size])
+
                 # Set max error rate to 100% (don't fail on errors)
                 cmd.extend(['-max_error_rate', '1.0'])
+
+                if self.verbose and is_large_file:
+                    tqdm.write(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings (queue:512, threads:4)")
 
             # Continue with encoding parameters
             cmd.extend([
@@ -368,6 +379,13 @@ class VideoEncoder:
                 '-crf', str(crf),
                 '-c:a', audio_codec,
             ])
+
+            # Dynamic thread limiting for large files in recovery mode
+            if self.recovery_mode:
+                file_size_gb = input_path.stat().st_size / (1024**3)
+                if file_size_gb > 10:
+                    cmd.extend(['-threads', '4'])
+
 
             # Add audio filter to handle problematic channel layouts
             # This fixes issues like "Unsupported channel layout '6 channels'"
@@ -454,18 +472,6 @@ class VideoEncoder:
                 # Read stderr line by line (FFmpeg writes progress to stderr)
                 try:
                     while True:
-                        # Check for shutdown request
-                        if shutdown_requested():
-                            if self.verbose:
-                                tqdm.write("  Shutdown requested, terminating encoding...")
-                            process.terminate()
-                            try:
-                                process.wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait()
-                            return False
-
                         line = process.stderr.readline()
                         if not line:
                             break

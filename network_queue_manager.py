@@ -212,6 +212,10 @@ class NetworkQueueManager:
                 self._update_file_state(queued_file, FileState.DOWNLOADING)
 
                 try:
+                    # Ensure temp directory exists before downloading
+                    if not self._ensure_temp_dir_exists():
+                        raise Exception("Temp directory unavailable")
+
                     # Copy from network to local temp
                     source = Path(queued_file.source_path)
                     local_path = self.temp_dir / f"download_{source.name}"
@@ -259,10 +263,10 @@ class NetworkQueueManager:
                 if shutdown_requested():
                     print()
                     print("="*60)
-                    print("SHUTDOWN REQUESTED - Finishing current video then stopping")
+                    print("SHUTDOWN REQUESTED - Stopping after current video")
                     print("="*60)
-                    # Process current item if available, then break
                     self.stop_event.set()  # Signal other threads to stop
+                    break  # Exit loop - current video already completed
 
                 # Get next file to encode (with timeout)
                 try:
@@ -277,9 +281,17 @@ class NetworkQueueManager:
                 self._update_file_state(queued_file, FileState.ENCODING)
 
                 try:
+                    # Ensure temp directory exists before encoding
+                    if not self._ensure_temp_dir_exists():
+                        raise Exception("Temp directory unavailable")
+
                     # Setup paths
                     local_input = Path(queued_file.local_path)
                     local_output = self.temp_dir / f"encoded_{local_input.stem}.mp4"
+
+                    # Verify local input still exists (might have been deleted)
+                    if not local_input.exists():
+                        raise Exception(f"Local input file missing: {local_input}")
 
                     if self.verbose:
                         self.logger.info(f"Encoding: {local_input.name}")
@@ -355,6 +367,10 @@ class NetworkQueueManager:
                 try:
                     output = Path(queued_file.output_path)
                     final = Path(queued_file.final_path)
+
+                    # Verify output file still exists (might have been deleted)
+                    if not output.exists():
+                        raise Exception(f"Encoded output file missing: {output}")
 
                     # Show upload progress (not just in verbose mode)
                     print(f"Uploading: {output.name} -> {final.name}")
@@ -440,9 +456,30 @@ class NetworkQueueManager:
         with self.files_lock:
             queued_file.state = new_state
 
+    def _ensure_temp_dir_exists(self) -> bool:
+        """
+        Ensure temp directory exists, recreating it if deleted.
+
+        Returns:
+            True if directory exists or was created, False on error
+        """
+        try:
+            if not self.temp_dir.exists():
+                if self.verbose:
+                    self.logger.warning(f"Temp directory missing, recreating: {self.temp_dir}")
+                self.temp_dir.mkdir(parents=True, exist_ok=True)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to create temp directory: {e}")
+            return False
+
     def save_state(self) -> None:
         """Persist queue state to disk for resume support"""
         try:
+            # Ensure parent directory exists (in case it was deleted)
+            if not self._ensure_temp_dir_exists():
+                return  # Can't save state if temp dir can't be created
+
             with self.files_lock:
                 state = {
                     'files': [f.to_dict() for f in self.files],
@@ -453,6 +490,7 @@ class NetworkQueueManager:
                 json.dump(state, f, indent=2)
 
         except Exception as e:
+            # Log but don't crash - state persistence is best-effort
             self.logger.error(f"Failed to save state: {e}")
 
     def load_state(self) -> bool:

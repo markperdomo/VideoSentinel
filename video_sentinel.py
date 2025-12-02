@@ -230,7 +230,7 @@ def handle_duplicate_group(
         print(f"  0 or Enter: Keep all (no action)")
         print()
 
-        choice = input(f"Your choice: ").strip().replace('\r', '')
+        choice = input(f"Your choice: ").strip('\r\n\t ').replace('\r', '').replace('\n', '')
 
         if choice.isdigit() and 1 <= int(choice) <= len(ranked_videos):
             keep_idx = int(choice) - 1
@@ -560,12 +560,14 @@ def main():
 
         compliant_videos = []
         non_compliant_videos = []
+        failed_analyses = []
 
         for video_path in tqdm(video_files, desc="Analyzing videos", unit="video"):
             video_info = analyzer.get_video_info(video_path)
 
             if not video_info or not video_info.is_valid:
                 tqdm.write(Colors.yellow(f"✗ {video_path.name}: Unable to analyze"))
+                failed_analyses.append(video_path)
                 continue
 
             is_compliant = analyzer.meets_modern_specs(video_info)
@@ -606,7 +608,15 @@ def main():
                     break
 
         print()
-        print(f"Summary: {Colors.green(f'{len(compliant_videos)} compliant')}, {Colors.red(f'{len(non_compliant_videos)} non-compliant')}")
+        print(f"Summary: {Colors.green(f'{len(compliant_videos)} compliant')}, {Colors.red(f'{len(non_compliant_videos)} non-compliant')}, {Colors.yellow(f'{len(failed_analyses)} failed analysis')}")
+
+        # Show failed analyses with full paths
+        if failed_analyses:
+            print()
+            print(Colors.yellow("Videos that couldn't be analyzed:"))
+            for video_path in failed_analyses:
+                print(f"  {video_path}")
+
         print()
 
         # Re-encode if requested
@@ -1102,7 +1112,7 @@ def main():
 
                     if args.duplicate_action == 'auto-best':
                         # Auto mode - delete immediately
-                        confirm = input(f"\nDelete {len(all_to_delete)} files? (yes/no): ").strip().replace('\r', '').lower()
+                        confirm = input(f"\nDelete {len(all_to_delete)} files? (yes/no): ").strip('\r\n\t ').replace('\r', '').replace('\n', '').lower()
                         if confirm == 'yes':
                             deleted_count = 0
                             total_size_freed = 0
