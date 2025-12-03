@@ -32,7 +32,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Returns `VideoInfo` dataclass with all video properties
 - Determines if videos meet modern specs (HEVC/H.265, AV1, VP9)
 - Finds video files by extension in directories
-- QuickLook compatibility checking (video_analyzer.py:200-283)
+- QuickLook compatibility checking
 
 **duplicate_detector.py** (Perceptual Hash Comparison & Filename Matching)
 - Implements multi-frame perceptual hashing using OpenCV and ImageHash
@@ -53,7 +53,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Validates output before considering encoding successful (checks file size, dimensions, duration)
 - Automatically cleans up invalid outputs; preserves originals by default
 - Resume-safe: validates existing outputs and skips re-encoding if valid
-- Fast remux capability for QuickLook fixes (encoder.py:703-779)
+- Fast remux capability for QuickLook fixes
 
 **issue_detector.py** (Problem Detection)
 - Quick scan: checks duration, audio presence, unusual specs (dimensions, fps, aspect ratio)
@@ -72,7 +72,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - State persistence for resume support (survives Ctrl+C interrupts)
 - Automatic cleanup of temp files after successful upload
 - Handles network filesystem limitations (falls back from copy2 to copy for metadata)
-- Resume State Validation (network_queue_manager.py:458-540):
+- Resume State Validation:
   - Validates temp files still exist when resuming
   - Re-downloads if temp files missing
   - Shows detailed resume summary with file state breakdown
@@ -87,27 +87,36 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Automatically stops listener threads when operations complete
 - No external dependencies beyond Python standard library
 
+**monitor_queue.py** (Queue Monitoring Utility)
+- Standalone CLI utility for monitoring network queue mode operations
+- Reads queue state file to display current status (pending, downloading, encoding, uploading, complete, failed)
+- Shows failed files with detailed error messages
+- Displays temp directory size and contents
+- Provides file-by-file status breakdown
+- Can filter to show only failed files with `--failed-only` flag
+- Useful for monitoring long-running queue mode sessions in a separate terminal
+
 ### Key Design Patterns
 
 **Dataclasses for Type Safety**
-- `VideoInfo` (video_analyzer.py:13-28): Immutable container for video metadata
-- `VideoIssue` (issue_detector.py:12-17): Immutable container for detected problems
+- `VideoInfo`: Immutable container for video metadata
+- `VideoIssue`: Immutable container for detected problems
 
-**Smart Quality Matching Algorithm** (encoder.py:34-119)
+**Smart Quality Matching Algorithm**
 The encoder calculates optimal CRF (Constant Rate Factor) based on source quality:
 1. Calculates bits per pixel (bpp) = bitrate / (width × height × fps)
 2. Maps bpp to quality tier with codec-specific CRF values
 3. High bpp (>0.25) → low CRF (18 for HEVC) = preserve high quality
 4. Low bpp (<0.05) → high CRF (28 for HEVC) = avoid wasting space
 
-**Multi-Frame Perceptual Hashing** (duplicate_detector.py:135-169)
+**Multi-Frame Perceptual Hashing**
 1. Extracts 10 frames evenly distributed throughout video
 2. Computes perceptual hash (phash) for each frame with 12x12 size
 3. Compares corresponding frames between videos
 4. Averages Hamming distances across all frame pairs
 5. Groups videos if average distance ≤ threshold (default 15)
 
-**Output Validation Safety** (encoder.py:256-354)
+**Output Validation Safety**
 Before deleting or replacing files, the encoder validates outputs:
 1. File exists and size > 1KB
 2. `ffprobe` can read the file
@@ -115,7 +124,7 @@ Before deleting or replacing files, the encoder validates outputs:
 4. Duration matches source within ±2 seconds
 5. If validation fails, deletes invalid output and preserves original
 
-**Replace Original Mode with Smart Resume** (encoder.py:234-270, 392-445)
+**Replace Original Mode with Smart Resume**
 When `--replace-original` flag is used, the encoder:
 1. Encodes to temporary output path with `_reencoded` suffix
 2. Validates the output thoroughly
@@ -125,7 +134,7 @@ When `--replace-original` flag is used, the encoder:
 4. Example: `video.avi` → encode to `video_reencoded.mp4` → delete `video.avi` → rename to `video.mp4`
 5. Extension is determined by target codec (all codecs currently use `.mp4`)
 
-**Smart Resume Support** (encoder.py:234-270):
+**Smart Resume Support**:
 If the process is interrupted, the encoder intelligently resumes:
 1. Checks if a valid `_reencoded` output already exists from previous run
 2. If found and valid, skips re-encoding and completes the replacement
@@ -134,7 +143,7 @@ If the process is interrupted, the encoder intelligently resumes:
 5. Never re-encodes files that are already successfully encoded
 6. Validates outputs before considering them complete to avoid using corrupted partial files
 
-**Real-Time Encoding Progress** (encoder.py:45-147, 455-490)
+**Real-Time Encoding Progress**
 During video encoding, the encoder displays live visual progress with queue position:
 1. Shows position in batch: `[1/5] Encoding: video.wmv`
 2. Parses FFmpeg's stderr output in real-time using regex patterns
@@ -166,29 +175,29 @@ Provides thread-safe graceful shutdown during batch encoding operations:
 
 ### Important Implementation Details
 
-**Modern Codec Standards** (video_analyzer.py:38-39)
+**Modern Codec Standards**
 - Modern: HEVC/H.265, AV1, VP9
 - Acceptable: H.264, HEVC, AV1, VP9
 - Videos must be in MP4, MKV, Matroska, or WebM containers
 
-**Encoding Presets** (encoder.py:24-29)
+**Encoding Presets**
 - FFmpeg presets: fast, medium, slow, veryslow
 - Trade-off between encoding speed and compression efficiency
 - Default: medium (balanced)
 
-**macOS QuickLook Compatibility** (encoder.py:263-290)
+**macOS QuickLook Compatibility**
 - **All output videos use MP4 container** (never preserves source extension like .avi, .wmv)
 - **HEVC**: Uses `-tag:v hvc1` (not default `hev1`) for Apple compatibility
 - **All codecs**: Forces `-pix_fmt yuv420p` for maximum player compatibility
 - **All codecs**: Uses `-movflags faststart` to move metadata to file start for instant QuickLook previews
 - Without these parameters, videos may not preview properly in macOS Finder/QuickLook
 
-**Codec Mappings** (encoder.py:17-21)
+**Codec Mappings**
 - h264 → libx264 (FFmpeg encoder)
 - hevc → libx265 (FFmpeg encoder)
 - av1 → libaom-av1 (FFmpeg encoder)
 
-**Video File Extensions** (video_analyzer.py:35)
+**Video File Extensions**
 Supported: 40+ video formats including:
 - Modern: .mp4, .mkv, .webm, .m4v, .mov
 - Legacy: .avi, .wmv, .asf, .divx
@@ -209,7 +218,7 @@ Supported: 40+ video formats including:
 - Timeout: 300 seconds (5 minutes) for integrity checks
 - Files are only deleted after successful encoding and validation
 
-**Smart Output Detection** (encoder.py:703-745)
+**Smart Output Detection**
 Before re-encoding, checks for existing valid outputs:
 - Looks for files with `_reencoded` or `_quicklook` suffixes matching the source filename
 - Validates outputs using same checks as post-encoding validation:
@@ -220,9 +229,9 @@ Before re-encoding, checks for existing valid outputs:
 - Deletes invalid/corrupted existing outputs
 - Skips encoding if valid output already exists
 - Implementation: `find_existing_output()` method with configurable suffix list
-- Used in video_sentinel.py:447-461 to pre-check before batch encoding
+- Used in main CLI to pre-check before batch encoding
 
-**Duplicate Filename Cleanup** (video_sentinel.py:816-849)
+**Duplicate Filename Cleanup**
 After deleting duplicates (auto-best or interactive mode):
 - Removes `_reencoded` suffix from kept files
 - Removes `_quicklook` suffix from kept files
@@ -232,7 +241,7 @@ After deleting duplicates (auto-best or interactive mode):
 - Shows progress: `✓ Renamed: video_reencoded.mp4 → video.mp4`
 - Handles errors gracefully (skips if target exists, shows error if rename fails)
 
-**Quality Ranking with Codec Efficiency** (video_sentinel.py:55-132)
+**Quality Ranking with Codec Efficiency**
 Duplicate quality ranking uses comprehensive scoring to prioritize the best file:
 
 **Ranking factors (in priority order):**
@@ -262,7 +271,48 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - `movie_reencoded.mp4` (1080p, 3000 kbps) beats `movie.mkv` (4K, 10000 kbps) ← intentional!
   - `movie_quicklook.mp4` (HVC1, 3000 kbps, MP4) beats `movie.mkv` (HEVC, 3500 kbps, MKV)
 
-**CLI Flags for Key Features**
+**CLI Flags Reference**
+
+**Core Operations**
+- `--check-specs`: Check if videos meet modern encoding specifications (HEVC/H.265, AV1, VP9)
+- `--find-duplicates`: Find duplicate videos using perceptual hashing (10-frame comparison)
+- `--re-encode`: Automatically re-encode videos that don't meet modern specs
+- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
+- `--check-issues`: Detect encoding issues and corrupted files (quick scan)
+
+**Encoding Options**
+- `--target-codec {h264,hevc,av1}`: Target codec for re-encoding (default: hevc)
+- `--downscale-1080p`: Downscale videos larger than 1080p to 1920x1080 while preserving aspect ratio
+  - Uses two-stage FFmpeg scale filter for proper dimension handling
+  - Only scales down, never upscales (videos ≤1080p are unchanged)
+- `--recover`: Enable error recovery mode during re-encoding
+  - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
+  - Input flags: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
+  - Output flags: `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
+- `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
+- `--output-dir PATH`: Custom directory for re-encoded videos (default: same as source with `_reencoded` suffix)
+
+**Duplicate Management**
+- `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
+  - Matches files with same name ignoring extension and `_reencoded`/`_quicklook` suffixes
+  - Useful when original files are broken and can't generate perceptual hashes
+- `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
+  - `report`: Only report duplicates, no action
+  - `interactive`: Ask user for each duplicate group
+  - `auto-best`: Automatically keep best quality, delete others
+
+**Issue Detection**
+- `--check-issues`: Detect encoding issues and corrupted files (quick scan)
+- `--deep-scan`: Perform deep integrity check (slower, decodes entire video to find frame-level corruption)
+
+**Network Queue Mode**
+- `--queue-mode`: Enable network queue mode (3-stage download → encode → upload pipeline for 2-3x speed)
+- `--temp-dir PATH`: Custom temporary directory for queue mode (default: system temp)
+- `--max-temp-size GB`: Maximum temp storage size in GB for queue mode (default: 50)
+- `--buffer-size N`: Number of files to buffer locally in queue mode (default: 4)
+- `--clear-queue`: Clear queue state and temp files from previous queue mode session
+
+**Filtering & Batch Control**
 - `--file-types TYPES`: Comma-separated file extensions to process (e.g., `wmv,avi,mov`)
   - Filters files at discovery stage (applies to all operations)
   - More efficient than scanning all files then filtering later
@@ -270,22 +320,10 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - **Smart re-encoding**: With `--re-encode`, stops analyzing early once enough non-compliant files are found (2x buffer), then filters to N files needing encoding
   - **Standard mode**: For other operations, limits to first N files discovered
   - Perfect for manageable batches, testing, or incremental processing on large libraries
-  - Respects `--file-types` and `--recursive` flags
-  - Implementation: `video_sentinel.py:370-374` (argument), `video_sentinel.py:533-535` (standard), `video_sentinel.py:576-581` (early exit), `video_sentinel.py:617-621` (final limit)
-- `--filename-duplicates`: Find duplicates by filename only (fast, no perceptual hashing)
-  - Matches files with same name ignoring extension and `_reencoded`/`_quicklook` suffixes
-  - Useful when original files are broken and can't generate perceptual hashes
-- `--recover`: Enable error recovery mode during re-encoding
-  - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
-  - Input flags: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
-  - Output flags: `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
-- `--downscale-1080p`: Downscale videos larger than 1080p during re-encoding
-  - Limits maximum resolution to 1920x1080 while preserving aspect ratio
-  - Uses two-stage FFmpeg scale filter for proper dimension handling
-  - Only scales down, never upscales (videos ≤1080p are unchanged)
-- `--fix-quicklook`: Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)
-- `--queue-mode`: Enable network queue mode (download → encode → upload pipeline)
-- `--duplicate-action {report,interactive,auto-best}`: How to handle duplicates (default: report)
+- `-r`, `--recursive`: Recursively scan subdirectories
+
+**General Options**
+- `-v`, `--verbose`: Enable verbose output for debugging
 
 ## Common Development Patterns
 
@@ -294,19 +332,19 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
 When adding new checks to `issue_detector.py`:
 1. Create a new method returning `VideoIssue` or `List[VideoIssue]`
 2. Set appropriate severity: 'critical', 'warning', or 'info'
-3. Add check to `scan_video()` method (issue_detector.py:304)
+3. Add check to `scan_video()` method
 4. Use descriptive `issue_type` strings (e.g., 'corruption', 'no_audio')
 
 ### Adding New Codecs
 
 To support new codecs in `encoder.py`:
-1. Add to `CODEC_MAP` dict (encoder.py:17) with FFmpeg encoder name
-2. Add CRF calculation logic in `calculate_optimal_crf()` (encoder.py:34)
-3. Add codec-specific parameters in `re_encode_video()` if needed (encoder.py:203-210)
+1. Add to `CODEC_MAP` dict with FFmpeg encoder name
+2. Add CRF calculation logic in `calculate_optimal_crf()` method
+3. Add codec-specific parameters in `re_encode_video()` method if needed
 
 ### Modifying Duplicate Detection Sensitivity
 
-Adjust in `DuplicateDetector.__init__()` (duplicate_detector.py:17):
+Adjust in `DuplicateDetector.__init__()`:
 - `threshold`: Lower = stricter matching (fewer false positives, may miss duplicates)
 - `num_samples`: More frames = more accurate but slower
 - `hash_size`: Larger = more granular but slower
@@ -320,7 +358,7 @@ Adjust in `DuplicateDetector.__init__()` (duplicate_detector.py:17):
 - Ubuntu/Debian: `sudo apt-get install ffmpeg`
 - Windows: `choco install ffmpeg`
 
-The application checks for FFmpeg availability at startup (video_sentinel.py:110-114) and exits if not found.
+The application checks for FFmpeg availability at startup and exits if not found.
 
 ### Python Dependencies
 
