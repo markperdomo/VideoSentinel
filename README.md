@@ -1,21 +1,24 @@
 # VideoSentinel
 
-A powerful Python CLI utility for managing and validating video libraries. VideoSentinel ensures your videos are properly encoded to modern specifications, detects duplicates using perceptual hashing, and identifies encoding issues.
+A Python CLI utility for managing and validating video libraries. Ensures videos are properly encoded to modern specifications, detects duplicates using perceptual hashing, and identifies encoding issues.
 
 ## Features
 
-- **Modern Codec Validation**: Ensures videos use modern codecs (HEVC/H.265, AV1, VP9)
-- **Smart Re-encoding**: Automatically re-encodes non-compliant videos with quality matching
-- **Duplicate Detection**:
-  - Perceptual hash-based detection (finds duplicates even with different encodings)
-  - Filename-based detection (fast alternative)
-  - Automatic or interactive duplicate management
-- **Error Recovery**: Salvage broken or corrupted videos with FFmpeg's error recovery mode
-- **Network Queue Mode**: 2-3x faster encoding on network storage with parallel download/encode/upload pipeline
-- **macOS QuickLook Fixes**: Automatically fix videos that won't preview in Finder
-- **Downscaling**: Reduce 4K videos to 1080p for space savings
-- **Resume Support**: Safe interruption and intelligent resume for all operations
-- **Graceful Shutdown**: Press 'q' to stop cleanly after current video completes
+### Core Capabilities
+- **Modern Codec Validation & Re-encoding**: Detect and re-encode videos to HEVC/H.265, AV1, or VP9 with smart quality matching
+- **Duplicate Detection**: Perceptual hash-based (10-frame comparison) or filename-based (fast alternative)
+- **Quality Ranking**: Automatic best-quality selection using codec efficiency, resolution, and bitrate analysis
+- **macOS QuickLook Fixes**: Fast remux (MKV→MP4) or re-encode to fix Finder previews
+- **Error Recovery**: Salvage corrupted videos with FFmpeg error-tolerant decoding
+- **Downscaling**: Reduce videos >1080p while preserving aspect ratio
+
+### Performance & Safety
+- **Network Queue Mode**: 3-stage pipeline (download→encode→upload) for 2-3x faster encoding on network storage
+- **Smart Resume**: Validates existing outputs, skips completed work, survives interruptions
+- **Graceful Shutdown**: Press 'q' to stop cleanly after current video
+- **Real-time Progress**: Live encoding stats with visual progress bars, speed multiplier, and ETA
+- **Output Validation**: Thoroughly validates re-encoded files before replacing originals
+- **Batch Control**: Filter by file type (`--file-types`), limit batch size (`--max-files`)
 
 ## Installation
 
@@ -47,70 +50,71 @@ pip install -r requirements.txt
 
 ## Quick Start
 
+### Basic Operations
 ```bash
 # Check encoding specifications
 python video_sentinel.py /path/to/videos --check-specs
 
-# Find duplicates using perceptual hashing
-python video_sentinel.py /path/to/videos --find-duplicates
-
-# Re-encode non-compliant videos
+# Re-encode non-compliant videos to HEVC
 python video_sentinel.py /path/to/videos --check-specs --re-encode
 
-# Fix QuickLook compatibility (fast remux)
+# Fix macOS QuickLook/Finder preview issues (fast remux)
 python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
-
-# Downscale 4K videos to 1080p and replace originals
-python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original
-
-# Network queue mode for fast encoding on network storage
-python video_sentinel.py /Volumes/NetworkDrive/videos --check-specs --re-encode --queue-mode
-
-# Find and automatically keep best quality duplicates
-python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action auto-best
-
-# Recover broken/corrupted videos
-python video_sentinel.py /path/to/broken_videos --check-specs --re-encode --recover
-
-# Process only specific file types
-python video_sentinel.py /path/to/videos --check-specs --re-encode --file-types wmv,avi,mov
-
-# Process files matching a wildcard pattern (e.g., all MKV files)
-python video_sentinel.py /path/to/videos/*.mkv --check-specs
 ```
 
-For comprehensive usage examples and detailed documentation, see [docs/USAGE.md](docs/USAGE.md).
+### Duplicate Management
+```bash
+# Find duplicates (perceptual hash-based)
+python video_sentinel.py /path/to/videos --find-duplicates
 
-## Architecture Overview
+# Auto-delete duplicates, keeping highest quality
+python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action auto-best
 
-VideoSentinel uses a modular architecture with clear separation of concerns:
+# Find duplicates by filename only (fast, for broken files)
+python video_sentinel.py /path/to/videos --find-duplicates --filename-duplicates
+```
 
-- **video_sentinel.py**: Main CLI entry point, orchestrates all operations
-- **video_analyzer.py**: Metadata extraction using ffprobe, QuickLook compatibility checking
-- **duplicate_detector.py**: Perceptual hash-based and filename-based duplicate detection
-- **encoder.py**: Smart quality-matching re-encoding with FFmpeg
-- **issue_detector.py**: Quick and deep video integrity scanning
-- **network_queue_manager.py**: Three-stage pipeline for network storage optimization
-- **shutdown_manager.py**: Thread-safe graceful shutdown management
+### Advanced Encoding
+```bash
+# Downscale 4K→1080p and replace originals
+python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original
 
-## Key Design Features
+# Network storage: 3-stage pipeline for 2-3x speed boost
+python video_sentinel.py /Volumes/Network/videos --check-specs --re-encode --queue-mode
 
-- **Smart Quality Matching**: Calculates optimal CRF based on source video quality (bits-per-pixel)
-- **Multi-Frame Perceptual Hashing**: Extracts 10 frames per video for robust duplicate detection
-- **Output Validation**: Thoroughly validates all re-encoded files before replacing originals
-- **Resume Safety**: Automatically detects and skips completed work when interrupted
-- **Real-Time Progress**: Live encoding progress with visual progress bars, speed, and ETA
-- **Graceful Shutdown**: Press 'q' to stop cleanly after current video
+# Recover corrupted/broken videos
+python video_sentinel.py /path/to/broken --check-specs --re-encode --recover
+
+# Process specific file types only
+python video_sentinel.py /path/to/videos --check-specs --file-types wmv,avi,mov
+
+# Limit batch size for testing
+python video_sentinel.py /path/to/videos --check-specs --re-encode --max-files 10
+```
+
+See [docs/USAGE.md](docs/USAGE.md) for comprehensive examples and advanced usage.
+
+## How It Works
+
+### Architecture
+Modular design with clear separation of concerns:
+- **video_analyzer.py**: FFprobe metadata extraction, QuickLook compatibility checking
+- **duplicate_detector.py**: 10-frame perceptual hashing, filename matching
+- **encoder.py**: Smart CRF calculation, quality-matched re-encoding
+- **network_queue_manager.py**: Download→encode→upload pipeline with state persistence
+- **shutdown_manager.py**: Thread-safe graceful shutdown (press 'q')
+
+### Key Algorithms
+- **Smart Quality Matching**: CRF calculated from source bits-per-pixel and codec efficiency multipliers (AV1: 2.5×, HEVC: 2.0×, H.264: 1.0×)
+- **Quality Ranking**: Newly processed files get +50K priority bonus, followed by QuickLook compatibility, container format, codec modernity, resolution, and normalized bitrate
+- **Perceptual Hashing**: 10 evenly-spaced frames per video, 12×12 phash, ≤15 Hamming distance threshold
+- **Resume Safety**: Validates existing `_reencoded`/`_quicklook` outputs, skips completed work, handles interrupted operations
 
 ## Requirements
 
-- Python 3.7+
-- FFmpeg (for video processing)
-- opencv-python (for frame extraction)
-- imagehash (for perceptual hashing)
-- Pillow (for image processing)
-- ffmpeg-python (FFmpeg wrapper)
-- tqdm (progress bars)
+- **Python 3.7+**
+- **FFmpeg** (system dependency - install via brew/apt/choco)
+- **Python packages**: opencv-python, imagehash, Pillow, ffmpeg-python, tqdm (see requirements.txt)
 
 ## Contributing
 
