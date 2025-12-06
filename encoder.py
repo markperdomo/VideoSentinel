@@ -393,56 +393,51 @@ class VideoEncoder:
             if self.recovery_mode:
                 cmd.extend(['-af', 'aformat=channel_layouts=5.1|5.1(side)|stereo'])
 
-            # Add final flags
-            cmd.extend([
-                '-y',  # Overwrite output file if exists
-                str(output_path)
-            ])
-
-            # Add downscaling filter if requested and video is larger than 1080p
+            # Build the video filter chain
+            vf_filters = []
             if self.downscale_1080p and video_info:
-                # Check if video is larger than 1080p (either dimension exceeds 1920x1080)
                 if video_info.width > 1920 or video_info.height > 1080:
-                    # Insert scale filter before output path
-                    # Two-stage scaling ensures dimensions are divisible by 2 (required by HEVC/x265):
-                    # 1. scale=1920:1080:force_original_aspect_ratio=decrease - fit within box
-                    # 2. scale=trunc(iw/2)*2:trunc(ih/2)*2 - round to even dimensions
-                    # This prevents "Cannot open libx265 encoder" errors from odd dimensions
-                    cmd.insert(-1, '-vf')
-                    cmd.insert(-1, 'scale=1920:1080:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2')
-
+                    vf_filters.append('scale=1920:1080:force_original_aspect_ratio=decrease')
                     if self.verbose:
-                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080 (ensuring even dimensions)")
+                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080")
+
+            # For HEVC, ensure dimensions are divisible by 2 to avoid encoder errors
+            if target_codec.lower() == 'hevc':
+                vf_filters.append('scale=trunc(iw/2)*2:trunc(ih/2)*2')
+                if self.verbose:
+                    tqdm.write("  Ensuring even dimensions for HEVC encoding")
+
+            # If any filters are defined, add them to the command
+            if vf_filters:
+                cmd.extend(['-vf', ",".join(vf_filters)])
 
             # Add codec-specific parameters
             if target_codec.lower() == 'hevc':
                 # Add macOS QuickLook compatibility
                 # Use hvc1 tag instead of hev1 for Apple device compatibility
-                cmd.insert(-1, '-tag:v')
-                cmd.insert(-1, 'hvc1')
+                cmd.extend(['-tag:v', 'hvc1'])
                 # Ensure yuv420p pixel format for maximum compatibility
-                cmd.insert(-1, '-pix_fmt')
-                cmd.insert(-1, 'yuv420p')
+                cmd.extend(['-pix_fmt', 'yuv420p'])
                 # Add movflags for better QuickLook compatibility
-                cmd.insert(-1, '-movflags')
-                cmd.insert(-1, 'faststart')
+                cmd.extend(['-movflags', 'faststart'])
                 # Add x265-params for better HEVC encoding
-                cmd.insert(-1, '-x265-params')
-                cmd.insert(-1, 'log-level=error')
+                cmd.extend(['-x265-params', 'log-level=error'])
             elif target_codec.lower() == 'h264':
                 # Add H.264-specific parameters for maximum compatibility
-                cmd.insert(-1, '-pix_fmt')
-                cmd.insert(-1, 'yuv420p')
+                cmd.extend(['-pix_fmt', 'yuv420p'])
                 # Add movflags for better QuickLook compatibility
-                cmd.insert(-1, '-movflags')
-                cmd.insert(-1, 'faststart')
+                cmd.extend(['-movflags', 'faststart'])
             elif target_codec.lower() == 'av1':
                 # Add AV1-specific parameters
-                cmd.insert(-1, '-cpu-used')
-                cmd.insert(-1, '4')  # Balance between speed and quality
+                cmd.extend(['-cpu-used', '4'])  # Balance between speed and quality
                 # Add movflags for better QuickLook compatibility
-                cmd.insert(-1, '-movflags')
-                cmd.insert(-1, 'faststart')
+                cmd.extend(['-movflags', 'faststart'])
+
+            # Add final flags
+            cmd.extend([
+                '-y',  # Overwrite output file if exists
+                str(output_path)
+            ])
 
         try:
             if not skip_encoding:
