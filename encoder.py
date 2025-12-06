@@ -472,6 +472,24 @@ class VideoEncoder:
                 # Read stderr line by line (FFmpeg writes progress to stderr)
                 try:
                     while True:
+                        # Check for shutdown signal before reading line
+                        if shutdown_requested():
+                            tqdm.write("\nShutdown requested, terminating encoding...")
+                            process.terminate()
+                            # Wait briefly for FFmpeg to exit gracefully
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill() # Force kill if it doesn't respond
+                                process.wait()
+                            
+                            # Clean up the partial file
+                            if output_path.exists():
+                                output_path.unlink()
+                                tqdm.write(f"  Removed partial file: {output_path.name}")
+                            
+                            return False # Signal that encoding was stopped
+
                         line = process.stderr.readline()
                         if not line:
                             break
@@ -527,16 +545,20 @@ class VideoEncoder:
 
                 except KeyboardInterrupt:
                     # User pressed Ctrl+C, terminate FFmpeg gracefully
-                    if self.verbose:
-                        tqdm.write("  Interrupted, terminating encoding...")
+                    tqdm.write("\nUser interrupted, terminating encoding...")
                     process.terminate()
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-                    # Re-raise to allow upper levels to handle
-                    raise
+                    
+                    # Clean up the partial file
+                    if output_path.exists():
+                        output_path.unlink()
+                        tqdm.write(f"  Removed partial file: {output_path.name}")
+                        
+                    return False # Treat interruption as a failure for queue management
 
                 # Clear the progress line before printing completion message
                 # Only needed if we were showing inline progress (non-verbose mode)

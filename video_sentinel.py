@@ -20,7 +20,7 @@ from duplicate_detector import DuplicateDetector
 from issue_detector import IssueDetector
 from encoder import VideoEncoder
 from network_queue_manager import NetworkQueueManager
-from shutdown_manager import start_shutdown_listener, stop_shutdown_listener
+from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
 
 
 # ANSI color codes for terminal output
@@ -746,6 +746,12 @@ def main():
                         print("Starting queue pipeline...")
                         print()
                         queue_manager.start(encode_callback)
+
+                        # If shutdown was requested, exit gracefully
+                        if shutdown_requested():
+                            print("Queue processing stopped by user.")
+                            # Cleanup is handled in the finally block
+                            sys.exit(0)
 
                         # Show final progress
                         progress = queue_manager.get_progress()
