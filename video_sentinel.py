@@ -312,6 +312,12 @@ def main():
     )
 
     parser.add_argument(
+        '--force-remux-mkv',
+        action='store_true',
+        help='Force remuxing of all MKV files to MP4, even if otherwise compliant'
+    )
+
+    parser.add_argument(
         '--duplicate-action',
         choices=['report', 'interactive', 'auto-best'],
         default='report',
@@ -550,6 +556,86 @@ def main():
 
     print(f"Found {len(video_files)} video files")
     print()
+
+    if args.force_remux_mkv:
+        print("="*80)
+        print("FORCE REMUX MKV TO MP4")
+        if args.replace_original:
+            print("⚠️  REPLACE MODE: Original MKV files will be deleted and replaced with MP4")
+        print("="*80)
+        print()
+
+        videos_to_remux = [p for p in video_files if p.suffix.lower() == '.mkv']
+
+        if not videos_to_remux:
+            print("No MKV files found to remux.")
+            sys.exit(0)
+
+        print(f"Found {len(videos_to_remux)} MKV files to remux.")
+        print()
+
+        if args.queue_mode:
+            print("QUEUE MODE ENABLED")
+            queue_manager = NetworkQueueManager(
+                temp_dir=args.temp_dir,
+                max_buffer_size=args.buffer_size,
+                max_temp_size_gb=args.max_temp_size,
+                verbose=args.verbose,
+                replace_original=args.replace_original
+            )
+            if queue_manager.load_state():
+                print("Resumed from previous session\n")
+            
+            queue_manager.add_files(videos_to_remux)
+
+            current_idx = [0]
+            total = len(videos_to_remux)
+
+            def remux_callback(local_input: Path, local_output: Path) -> bool:
+                """Callback for remuxing a single video in queue mode"""
+                current_idx[0] += 1
+                print(f"[{current_idx[0]}/{total}] Remuxing: {local_input.name}")
+                success = encoder.remux_to_mp4(local_input, local_output)
+                if success:
+                    print(f"✓ [{current_idx[0]}/{total}] Completed: {local_input.name}")
+                return success
+
+            try:
+                start_shutdown_listener()
+                queue_manager.start(remux_callback)
+            except KeyboardInterrupt:
+                print("\n\nInterrupted by user. Queue state saved for resume.")
+                sys.exit(0)
+            finally:
+                stop_shutdown_listener()
+        else:
+            # Standard mode
+            for video_path in tqdm(videos_to_remux, desc="Remuxing MKV files", unit="video"):
+                output_path = video_path.with_suffix('.mp4')
+                
+                # Prevent overwriting itself if name is same after suffix change
+                if output_path == video_path:
+                    # This case should not happen with .mkv -> .mp4, but as a safeguard
+                    tqdm.write(f"{Colors.yellow('Skipping:')} {video_path.name} (output path is the same)")
+                    continue
+
+                tqdm.write(f"Remuxing: {video_path.name} → {output_path.name}")
+                success = encoder.remux_to_mp4(video_path, output_path)
+
+                if success:
+                    if args.replace_original:
+                        try:
+                            video_path.unlink()
+                            tqdm.write(f"✓ Replaced: {video_path.name} with {output_path.name}")
+                        except Exception as e:
+                            tqdm.write(f"{Colors.red('✗')} Failed to delete original file {video_path.name}: {e}")
+                    else:
+                        tqdm.write(f"✓ Created: {output_path.name}")
+                else:
+                    tqdm.write(f"{Colors.red('✗')} Failed to remux: {video_path.name}")
+
+        print("\nForce remux complete.")
+        sys.exit(0)
 
     # Check encoding specifications
     if args.check_specs:
