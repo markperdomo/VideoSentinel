@@ -390,9 +390,11 @@ class VideoAnalyzer:
         # Search for files
         if recursive:
             for ext in search_extensions:
-                video_files.extend(directory.rglob(f'*{ext}'))
+                pattern = ''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)
+                video_files.extend(directory.rglob(f'*{pattern}'))
         else:
             for ext in search_extensions:
-                video_files.extend(directory.glob(f'*{ext}'))
+                pattern = ''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)
+                video_files.extend(directory.glob(f'*{pattern}'))
 
         return sorted(video_files)
