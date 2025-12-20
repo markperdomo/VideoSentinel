@@ -11,6 +11,9 @@ A Python CLI utility for managing and validating video libraries. Ensures videos
 - **macOS QuickLook Fixes**: Fast remux (MKV→MP4) or re-encode to fix Finder previews
 - **Error Recovery**: Salvage corrupted videos with FFmpeg error-tolerant decoding
 - **Downscaling**: Reduce videos >1080p while preserving aspect ratio
+- **Library Statistics**: Get a breakdown of video codecs and their storage usage with `--stats`
+- **Recursive Scanning**: Process directories recursively with `-r` or `--recursive`
+- **Corruption Detection**: Identify encoding issues and corrupted files with `--check-issues` and perform a full integrity check with `--deep-scan`
 
 ### Performance & Safety
 - **Network Queue Mode**: 3-stage pipeline (download→encode→upload) for 2-3x faster encoding on network storage
@@ -19,6 +22,7 @@ A Python CLI utility for managing and validating video libraries. Ensures videos
 - **Real-time Progress**: Live encoding stats with visual progress bars, speed multiplier, and ETA
 - **Output Validation**: Thoroughly validates re-encoded files before replacing originals
 - **Batch Control**: Filter by file type (`--file-types`), limit batch size (`--max-files`)
+- **Flexible Output Options**: Specify a target codec (`--target-codec`), a custom output directory (`--output-dir`), or replace original files (`--replace-original`)
 
 ## Installation
 
@@ -62,6 +66,12 @@ python video_sentinel.py /path/to/videos --check-specs --re-encode
 python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
 ```
 
+### Library Statistics
+```bash
+# Get a breakdown of video codecs and their storage usage
+python video_sentinel.py /path/to/videos --stats --recursive
+```
+
 ### Duplicate Management
 ```bash
 # Find duplicates (perceptual hash-based)
@@ -90,6 +100,15 @@ python video_sentinel.py /path/to/videos --check-specs --file-types wmv,avi,mov
 
 # Limit batch size for testing
 python video_sentinel.py /path/to/videos --check-specs --re-encode --max-files 10
+
+# Detect encoding issues
+python video_sentinel.py /path/to/videos --check-issues
+
+# Perform a deep scan for corruption (slower)
+python video_sentinel.py /path/to/videos --check-issues --deep-scan
+
+# Force remuxing of all MKV files to MP4
+python video_sentinel.py /path/to/videos --force-remux-mkv --replace-original
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for comprehensive examples and advanced usage.
@@ -103,6 +122,8 @@ Modular design with clear separation of concerns:
 - **encoder.py**: Smart CRF calculation, quality-matched re-encoding
 - **network_queue_manager.py**: Download→encode→upload pipeline with state persistence
 - **shutdown_manager.py**: Thread-safe graceful shutdown (press 'q')
+- **stats.py**: Video codec and size statistics
+- **issue_detector.py**: Detects encoding issues and corruption
 
 ### Key Algorithms
 - **Smart Quality Matching**: CRF calculated from source bits-per-pixel and codec efficiency multipliers (AV1: 2.5×, HEVC: 2.0×, H.264: 1.0×)

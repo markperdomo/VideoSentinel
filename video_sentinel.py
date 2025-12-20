@@ -21,6 +21,8 @@ from issue_detector import IssueDetector
 from encoder import VideoEncoder
 from network_queue_manager import NetworkQueueManager
 from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
+from stats import StatsCollector
+
 
 
 # ANSI color codes for terminal output
@@ -288,6 +290,12 @@ def main():
     )
 
     parser.add_argument(
+        '--stats',
+        action='store_true',
+        help='Display statistics about video codecs and sizes'
+    )
+
+    parser.add_argument(
         '--check-specs',
         action='store_true',
         help='Check if videos meet modern encoding specifications'
@@ -481,10 +489,28 @@ def main():
         args.check_specs = True
 
     # If no action specified at all, show all checks by default
-    if not any([args.check_specs, args.find_duplicates, args.filename_duplicates, args.check_issues, args.re_encode, args.fix_quicklook]):
+    if not any([args.check_specs, args.find_duplicates, args.filename_duplicates, args.check_issues, args.re_encode, args.fix_quicklook, args.stats]):
         args.check_specs = True
         args.find_duplicates = True
         args.check_issues = True
+    
+    # Handle stats separately
+    if args.stats:
+        print("="*80)
+        print("Video Library Statistics")
+        print("="*80)
+        
+        analyzer = VideoAnalyzer(verbose=args.verbose)
+        stats_collector = StatsCollector(analyzer)
+        
+        for path in args.paths:
+            print(f"Processing path: {path}")
+            codec_stats = stats_collector.collect_stats(path, args.recursive)
+            stats_collector.display_stats(codec_stats)
+            print()
+            
+        sys.exit(0)
+
 
     # Check ffmpeg availability
     encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover, downscale_1080p=args.downscale_1080p)
