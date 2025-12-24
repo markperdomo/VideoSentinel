@@ -74,6 +74,7 @@ python video_sentinel.py [PATH_TO_VIDEOS] [OPTIONS]
 -   `--output-dir [PATH]`: Specify a custom directory for output files.
 -   `--replace-original`: Replace original files with the processed versions.
 -   `--max-files [N]`: Limit the number of files to process.
+-   `--create-samples`: Analyze videos in a directory/subdirectory and create sample FFmpeg files using a synthetic test pattern. The filenames reflect codec, resolution, and extension, ensuring unique permutations are stored.
 
 ### Common Use-Cases
 
@@ -92,6 +93,10 @@ python video_sentinel.py [PATH_TO_VIDEOS] [OPTIONS]
 -   **Get a statistical breakdown of codecs used in a library:**
     ```bash
     python video_sentinel.py /path/to/videos -r --stats
+    ```
+-   **Create sample video files for unique codec/resolution combinations found in a directory:**
+    ```bash
+    python video_sentinel.py /path/to/videos --create-samples
     ```
 -   **Re-encode specific file types to AV1 and save them to a different location:**
     ```bash

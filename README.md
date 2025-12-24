@@ -14,6 +14,7 @@ A Python CLI utility for managing and validating video libraries. Ensures videos
 - **Library Statistics**: Get a breakdown of video codecs and their storage usage with `--stats`
 - **Recursive Scanning**: Process directories recursively with `-r` or `--recursive`
 - **Corruption Detection**: Identify encoding issues and corrupted files with `--check-issues` and perform a full integrity check with `--deep-scan`
+- **Sample Video Generation**: Create sample FFmpeg files for unique codec/resolution permutations found in a library.
 
 ### Performance & Safety
 - **Network Queue Mode**: 3-stage pipeline (download→encode→upload) for 2-3x faster encoding on network storage
@@ -109,6 +110,10 @@ python video_sentinel.py /path/to/videos --check-issues --deep-scan
 
 # Force remuxing of all MKV files to MP4
 python video_sentinel.py /path/to/videos --force-remux-mkv --replace-original
+
+# Generate sample video files for unique codec/resolution combinations
+python video_sentinel.py /path/to/videos --create-samples
+
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for comprehensive examples and advanced usage.

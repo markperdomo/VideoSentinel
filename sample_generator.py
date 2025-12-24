@@ -77,31 +77,28 @@ def create_sample_video(video_info: VideoInfo, sample_dir='sample_video_files'):
         if not width or not height or permutation in generated_permutations:
             return
 
+        # --- Path Fix: Make output path absolute based on this script's location ---
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        absolute_sample_dir = os.path.join(script_dir, sample_dir)
+
         # Generate a descriptive filename
         output_filename = f"sample_{width}x{height}_{codec}.{ext}"
-        output_path = os.path.join(sample_dir, output_filename)
+        output_path = os.path.join(absolute_sample_dir, output_filename)
 
         if os.path.exists(output_path):
             logging.debug(f"Sample file already exists: {output_path}")
             generated_permutations.add(permutation)
             return
-
-        # Use a standard sample file as input
-        base_sample = os.path.join(sample_dir, '11_h264_main.mp4')
-        if not os.path.exists(base_sample):
-            logging.error(f"Base sample file not found: {base_sample}")
-            return
             
         logging.info(f"Creating sample for permutation: {permutation}")
 
-        # Construct the ffmpeg command
+        # Construct the ffmpeg command to generate a synthetic test pattern
         command = [
             'ffmpeg',
-            '-i', base_sample,
-            '-vf', f'scale={width}:{height}',
+            '-f', 'lavfi',
+            '-i', f'testsrc=duration=5:size={width}x{height}:rate=30',
             '-c:v', encoder,
             '-y', # Overwrite output file if it exists
-            '-t', '5', # Create a 5-second sample
             output_path
         ]
 
