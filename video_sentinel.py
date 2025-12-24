@@ -22,6 +22,7 @@ from encoder import VideoEncoder
 from network_queue_manager import NetworkQueueManager
 from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
 from stats import StatsCollector
+from sample_generator import create_sample_video
 
 
 
@@ -339,6 +340,12 @@ def main():
     )
 
     parser.add_argument(
+        '--create-samples',
+        action='store_true',
+        help='Analyze videos and create a sample FFmpeg file for unique permutations.'
+    )
+
+    parser.add_argument(
         '--deep-scan',
         action='store_true',
         help='Perform deep integrity check (slower, decodes entire video to find corruption)'
@@ -582,6 +589,21 @@ def main():
 
     print(f"Found {len(video_files)} video files")
     print()
+
+    # Create samples if requested
+    if args.create_samples:
+        print("="*80)
+        print("CREATING SAMPLE VIDEOS")
+        print("="*80)
+        print()
+
+        for video_path in tqdm(video_files, desc="Generating samples", unit="video"):
+            video_info = analyzer.get_video_info(video_path)
+            if video_info and video_info.is_valid:
+                create_sample_video(video_info)
+        
+        print("\nSample creation process complete.")
+        sys.exit(0)
 
     if args.force_remux_mkv:
         print("="*80)
