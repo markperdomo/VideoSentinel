@@ -5,6 +5,7 @@ A Python CLI utility for managing and validating video libraries. Ensures videos
 ## Features
 
 ### Core Capabilities
+- **Process video paths from a text file**: Use `--file-list` to provide paths directly, one per line.
 - **Modern Codec Validation & Re-encoding**: Detect and re-encode videos to HEVC/H.265, AV1, or VP9 with smart quality matching
 - **Duplicate Detection**: Perceptual hash-based (10-frame comparison) or filename-based (fast alternative)
 - **Quality Ranking**: Automatic best-quality selection using codec efficiency, resolution, and bitrate analysis
@@ -57,6 +58,9 @@ pip install -r requirements.txt
 
 ### Basic Operations
 ```bash
+# Process a list of video files from a text file and check their specifications
+python video_sentinel.py --file-list /path/to/my_video_list.txt --check-specs
+
 # Check encoding specifications
 python video_sentinel.py /path/to/videos --check-specs
 
