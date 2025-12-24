@@ -61,6 +61,7 @@ python video_sentinel.py [PATH_TO_VIDEOS] [OPTIONS]
 
 ### Key Options
 
+-   `--file-list [PATH]`: Path to a text file containing video file paths (one path per line). This is an alternative to providing directory or file paths directly.
 -   `-r`, `--recursive`: Scan directories recursively.
 -   `-v`, `--verbose`: Enable verbose output.
 -   `--check-specs`: Check if videos conform to modern encoding standards (e.g., HEVC, AV1).
@@ -78,6 +79,10 @@ python video_sentinel.py [PATH_TO_VIDEOS] [OPTIONS]
 
 ### Common Use-Cases
 
+-   **Process a list of video files from a text file and check their specifications:**
+    ```bash
+    python video_sentinel.py --file-list /path/to/my_video_list.txt --check-specs
+    ```
 -   **Analyze a directory recursively and re-encode non-compliant files to HEVC:**
     ```bash
     python video_sentinel.py /path/to/videos -r --check-specs --re-encode

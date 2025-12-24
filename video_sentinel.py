@@ -281,7 +281,13 @@ def main():
         'paths',
         type=Path,
         nargs='*',
-        help='Video files or directories to analyze (not required for --clear-queue)'
+        help='Video files or directories to analyze (not required for --clear-queue, --file-list)'
+    )
+
+    parser.add_argument(
+        '--file-list',
+        type=Path,
+        help='Path to a text file containing video file paths (one path per line)'
     )
 
     parser.add_argument(
@@ -473,19 +479,33 @@ def main():
         print("="*80)
         sys.exit(0)
 
-    # Validate input paths (required unless using --clear-queue)
-    if not args.paths and not args.clear_queue:
-        print(f"Error: Path argument is required (provide one or more video files or directories)", file=sys.stderr)
+    if not args.paths and not args.file_list and not args.clear_queue:
+        print(f"Error: Path argument or --file-list is required (provide one or more video files/directories or a file list)", file=sys.stderr)
         parser.print_help()
         sys.exit(1)
 
-    for path in args.paths:
-        if not path.exists():
-            print(f"Error: Path '{path}' does not exist", file=sys.stderr)
+    if args.paths and args.file_list:
+        print(f"Error: Cannot use --file-list with positional path arguments simultaneously. Choose one or the other.", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate input paths (required unless using --clear-queue or --file-list)
+    if args.paths:
+        for path in args.paths:
+            if not path.exists():
+                print(f"Error: Path '{path}' does not exist", file=sys.stderr)
+                sys.exit(1)
+            if not path.is_file() and not path.is_dir():
+                print(f"Error: '{path}' is not a valid file or directory", file=sys.stderr)
+                sys.exit(1)
+    
+    if args.file_list:
+        if not args.file_list.exists():
+            print(f"Error: File list '{args.file_list}' does not exist", file=sys.stderr)
             sys.exit(1)
-        if not path.is_file() and not path.is_dir():
-            print(f"Error: '{path}' is not a valid file or directory", file=sys.stderr)
+        if not args.file_list.is_file():
+            print(f"Error: '{args.file_list}' is not a valid file", file=sys.stderr)
             sys.exit(1)
+
 
     # If re-encode is specified, automatically enable check-specs (required for re-encoding)
     if args.re_encode and not args.check_specs:
@@ -535,6 +555,11 @@ def main():
         for path in args.paths:
             print(f"  - {path}")
         print(f"Recursive scan: {args.recursive}")
+    elif args.file_list:
+        print(f"Processing videos from file list: {args.file_list}")
+    else:
+        print("No specific paths or file list provided for processing (e.g., --clear-queue was used).")
+
     
     print(f"Target codec: {args.target_codec.upper()}")
     print("="*80)
@@ -556,9 +581,25 @@ def main():
         ]
         print(f"File type filter: {', '.join(file_types_filter).upper()}")
 
-    # Find all video files from the provided paths
+    # Find all video files from the provided paths or file list
     video_files = []
-    if args.paths:
+    if args.file_list:
+        print(f"Reading video paths from: {args.file_list}")
+        try:
+            with open(args.file_list, 'r') as f:
+                for line in f:
+                    path_str = line.strip()
+                    if path_str:
+                        video_path = Path(path_str)
+                        if video_path.exists() and video_path.is_file() and video_path.suffix.lower() in analyzer.VIDEO_EXTENSIONS:
+                            video_files.append(video_path)
+                        else:
+                            if args.verbose:
+                                print(f"Skipping invalid or non-video entry in file list: {path_str}")
+        except Exception as e:
+            print(f"Error reading file list '{args.file_list}': {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.paths:
         print("Finding video files...")
         for path in args.paths:
             if path.is_file():
