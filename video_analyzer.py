@@ -417,16 +417,22 @@ class VideoAnalyzer:
                 issues.append(f"Container is {container}, should be MP4")
                 needs_remux = True
 
-            # Check 2: For HEVC, check codec tag (should be hvc1, not hev1)
+            # Check 2: Codec must be H.264 or HEVC for QuickLook
             codec_name = video_stream.get('codec_name', '').lower()
+            supported_codecs = ['h264', 'avc1', 'hevc', 'h265', 'mpeg4']
+            if codec_name not in supported_codecs:
+                issues.append(f"Codec is {codec_name}, should be H.264 or HEVC for QuickLook")
+                needs_reencode = True
+
+            # Check 3: For HEVC, check codec tag (should be hvc1, not hev1)
             codec_tag = video_stream.get('codec_tag_string', '').lower()
 
             if codec_name in ['hevc', 'h265']:
                 if codec_tag != 'hvc1':
                     issues.append(f"HEVC tag is {codec_tag}, should be hvc1 for QuickLook")
-                    needs_reencode = True
+                    needs_remux = True  # Tag change only needs remux, not re-encode
 
-            # Check 3: Pixel format should be yuv420p
+            # Check 4: Pixel format should be yuv420p
             pix_fmt = video_stream.get('pix_fmt', '').lower()
             if pix_fmt and pix_fmt != 'yuv420p':
                 issues.append(f"Pixel format is {pix_fmt}, should be yuv420p")

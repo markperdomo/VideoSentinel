@@ -616,20 +616,22 @@ class VideoEncoder:
                     # (This handles the case where source was already .mp4)
                     if final_path.exists():
                         if self.verbose:
-                            tqdm.write(f"Removing original: {final_path}")
+                            tqdm.write(f"Removing existing file at target: {final_path}")
                         final_path.unlink()
 
                     # Rename output to final path
                     if self.verbose:
                         tqdm.write(f"Renaming {output_path.name} -> {final_path.name}")
                     output_path.rename(final_path)
-                else:
-                    # Output path already matches desired final path
-                    # Just need to delete the original if it's different
-                    if input_path.exists() and input_path != final_path:
-                        if self.verbose:
-                            tqdm.write(f"Removing original: {input_path}")
-                        input_path.unlink()
+
+                # Delete original input file if it's different from the final path
+                # (This handles e.g. .avi -> .mp4, where we need to delete the .avi)
+                # Note: If input_path == final_path (e.g. .mp4 -> .mp4), it was already
+                # deleted in the block above when we cleared the destination.
+                if input_path.exists() and input_path != final_path:
+                    if self.verbose:
+                        tqdm.write(f"Removing original source: {input_path}")
+                    input_path.unlink()
             elif not keep_original:
                 # Legacy behavior: just remove original without renaming
                 if self.verbose:
@@ -951,6 +953,24 @@ class VideoEncoder:
 
         return None
 
+    def _get_video_codec(self, file_path: Path) -> Optional[str]:
+        """Get video codec of a file using ffprobe"""
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=codec_name',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(file_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                return result.stdout.strip().lower()
+        except Exception:
+            pass
+        return None
+
     def remux_to_mp4(
         self,
         input_path: Path,
@@ -989,7 +1009,10 @@ class VideoEncoder:
 
             # For HEVC videos, fix the tag for Apple compatibility
             if fix_hevc_tag:
-                cmd.extend(['-tag:v', 'hvc1'])
+                # Check if it's actually HEVC before applying tag
+                codec = self._get_video_codec(input_path)
+                if codec in ['hevc', 'h265', 'hev1', 'hvc1']:
+                    cmd.extend(['-tag:v', 'hvc1'])
 
             cmd.append(str(output_path))
 
