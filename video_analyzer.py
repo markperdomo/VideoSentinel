@@ -5,8 +5,8 @@ Video analysis module for checking encoding specs and detecting issues
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, List
-from dataclasses import dataclass
+from typing import Dict, Optional, List, Any
+from dataclasses import dataclass, asdict
 
 
 @dataclass
@@ -26,6 +26,95 @@ class VideoInfo:
     file_size: int = 0
     is_valid: bool = True
     error_message: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        data = asdict(self)
+        data['file_path'] = str(self.file_path.absolute())
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VideoInfo':
+        """Create from dictionary"""
+        data['file_path'] = Path(data['file_path'])
+        # Ensure resolution is a tuple (JSON loads as list)
+        if 'resolution' in data:
+            data['resolution'] = tuple(data['resolution'])
+        return cls(**data)
+
+
+class VideoCache:
+    """Simple JSON-based cache for video analysis results"""
+
+    def __init__(self, cache_file: Path):
+        self.cache_file = cache_file
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.modified = False
+        self.updates_count = 0
+        self.load()
+
+    def load(self):
+        """Load cache from disk"""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r') as f:
+                    self.cache = json.load(f)
+            except Exception:
+                # Silently fail on load error
+                self.cache = {}
+
+    def save(self):
+        """Save cache to disk"""
+        if not self.modified:
+            return
+
+        try:
+            # Atomic write pattern
+            temp_file = self.cache_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(self.cache, f, indent=2)
+            temp_file.replace(self.cache_file)
+            self.modified = False
+            self.updates_count = 0
+        except Exception:
+            pass
+
+    def get(self, file_path: Path) -> Optional[VideoInfo]:
+        """Get cached info if valid"""
+        key = str(file_path.absolute())
+        entry = self.cache.get(key)
+
+        if not entry:
+            return None
+
+        try:
+            stat = file_path.stat()
+            # Check if file hasn't changed (mtime and size match)
+            if entry.get('mtime') == stat.st_mtime and entry.get('size') == stat.st_size:
+                return VideoInfo.from_dict(entry['info'])
+        except OSError:
+            pass
+
+        return None
+
+    def set(self, file_path: Path, info: VideoInfo):
+        """Update cache entry"""
+        try:
+            stat = file_path.stat()
+            key = str(file_path.absolute())
+            self.cache[key] = {
+                'mtime': stat.st_mtime,
+                'size': stat.st_size,
+                'info': info.to_dict()
+            }
+            self.modified = True
+            self.updates_count += 1
+
+            # Auto-save periodically
+            if self.updates_count >= 50:
+                self.save()
+        except OSError:
+            pass
 
 
 class VideoAnalyzer:
@@ -61,7 +150,7 @@ class VideoAnalyzer:
     MODERN_CODECS = {'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
     ACCEPTABLE_CODECS = {'h264', 'avc', 'avc1', 'hevc', 'h265', 'hvc1', 'hev1', 'av1', 'av01', 'vp9', 'vp09'}
 
-    def __init__(self, verbose: bool = False, max_resolution: Optional[tuple] = None):
+    def __init__(self, verbose: bool = False, max_resolution: Optional[tuple] = None, use_cache: bool = True):
         """
         Initialize VideoAnalyzer
 
@@ -70,9 +159,26 @@ class VideoAnalyzer:
             max_resolution: Optional (width, height) tuple for maximum acceptable resolution.
                           Videos exceeding this will be marked as non-compliant.
                           E.g., (1920, 1080) for 1080p maximum.
+            use_cache: Enable caching of analysis results (default: True)
         """
         self.verbose = verbose
         self.max_resolution = max_resolution
+        self.use_cache = use_cache
+        self.cache = None
+
+        if use_cache:
+            # Use a hidden file in the user's home directory for global caching
+            try:
+                cache_path = Path.home() / '.video_sentinel_cache.json'
+                self.cache = VideoCache(cache_path)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Warning: Could not initialize cache: {e}")
+
+    def save_cache(self):
+        """Manually save the cache to disk"""
+        if self.cache:
+            self.cache.save()
 
     def is_video_file(self, file_path: Path) -> bool:
         """Check if file is a video based on extension"""
@@ -80,7 +186,35 @@ class VideoAnalyzer:
 
     def get_video_info(self, file_path: Path) -> Optional[VideoInfo]:
         """
-        Extract video information using ffprobe
+        Extract video information using ffprobe (with caching)
+
+        Args:
+            file_path: Path to video file
+
+        Returns:
+            VideoInfo object or None if file cannot be analyzed
+        """
+        if not file_path.exists():
+            return None
+
+        # Check cache first
+        if self.cache:
+            cached_info = self.cache.get(file_path)
+            if cached_info:
+                return cached_info
+
+        # Probe file
+        info = self._probe_video_info(file_path)
+
+        # Cache result
+        if info and self.cache:
+            self.cache.set(file_path, info)
+
+        return info
+
+    def _probe_video_info(self, file_path: Path) -> Optional[VideoInfo]:
+        """
+        Internal method to extract video information using ffprobe without caching
 
         Args:
             file_path: Path to video file

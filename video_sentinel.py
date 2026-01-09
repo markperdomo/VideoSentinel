@@ -536,6 +536,7 @@ def main():
             stats_collector.display_stats(codec_stats)
             print()
             
+        analyzer.save_cache()
         sys.exit(0)
 
 
@@ -643,6 +644,7 @@ def main():
             if video_info and video_info.is_valid:
                 create_sample_video(video_info)
         
+        analyzer.save_cache()
         print("\nSample creation process complete.")
         sys.exit(0)
 
@@ -950,6 +952,7 @@ def main():
                         print("="*80)
                         queue_manager.stop()
                         stop_shutdown_listener()
+                        analyzer.save_cache()
                         print()
                         print("Progress saved. Run the same command again to resume.")
                         print()
@@ -974,6 +977,7 @@ def main():
                         print("INTERRUPTED - Stopping after current video")
                         print("="*80)
                         stop_shutdown_listener()
+                        analyzer.save_cache()
                         print()
                         print("You can safely resume by running the same command again.")
                         print()
@@ -1159,6 +1163,7 @@ def main():
                 except KeyboardInterrupt:
                     print("\n\nInterrupted by user. Queue state saved for resume.")
                     print("Run the same command again to resume from where you left off.")
+                    analyzer.save_cache()
                     sys.exit(0)
                 finally:
                     stop_shutdown_listener()
@@ -1460,6 +1465,8 @@ def main():
     print("="*80)
     print("VideoSentinel scan complete!")
     print("="*80)
+
+    analyzer.save_cache()
 
 
 if __name__ == '__main__':
