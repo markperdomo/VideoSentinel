@@ -4,6 +4,7 @@ Duplicate video detection using perceptual hashing
 
 import cv2
 import imagehash
+import re
 from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Set
@@ -167,7 +168,7 @@ class DuplicateDetector:
                 tqdm.write(f"Error computing hash for {video_path}: {e}")
             return None
 
-    def find_duplicates(self, video_paths: List[Path]) -> Dict[str, List[Path]]:
+    def find_duplicates(self, video_paths: List[Path]) -> Tuple[Dict[str, List[Path]], List[Path]]:
         """
         Find duplicate videos in a list using multi-frame perceptual hashing
 
@@ -175,17 +176,24 @@ class DuplicateDetector:
             video_paths: List of video file paths
 
         Returns:
-            Dictionary mapping group IDs to lists of duplicate video paths
+            Tuple containing:
+            - Dictionary mapping group IDs to lists of duplicate video paths
+            - List of video paths that failed hashing (potential corruption/issues)
         """
         # Compute hashes for all videos
         video_hashes: Dict[Path, List[imagehash.ImageHash]] = {}
+        failed_videos: List[Path] = []
 
         for video_path in tqdm(video_paths, desc="Computing hashes", unit="video"):
             hash_list = self.compute_video_hash(video_path)
             if hash_list is not None:
                 video_hashes[video_path] = hash_list
+            else:
+                failed_videos.append(video_path)
 
         tqdm.write(f"Successfully hashed {len(video_hashes)} videos")
+        if failed_videos:
+            tqdm.write(f"Failed to hash {len(failed_videos)} videos")
 
         # Find similar videos based on average hash distance across frames
         duplicate_groups: Dict[str, List[Path]] = {}
@@ -219,7 +227,7 @@ class DuplicateDetector:
                 duplicate_groups[f"group_{group_id}"] = current_group
                 group_id += 1
 
-        return duplicate_groups
+        return duplicate_groups, failed_videos
 
     def _compare_video_hashes(
         self,
@@ -304,16 +312,53 @@ class DuplicateDetector:
         # Group videos by normalized filename
         filename_groups: Dict[str, List[Path]] = defaultdict(list)
 
+        # Common suffixes to strip
+        common_suffixes = [
+            '_reencoded', '_quicklook',
+            '_hevc', '_h265', '_x265',
+            '_av1', '_vp9',
+            '_h264', '_x264', '_avc',
+            '_hvc1', '_hev1',
+            '_old', '_backup'
+        ]
+
         for video_path in video_paths:
             # Get the base filename without extension
             stem = video_path.stem
-
-            # Remove common suffixes: _reencoded, _quicklook
             normalized_name = stem
-            for suffix in ['_reencoded', '_quicklook']:
-                if normalized_name.endswith(suffix):
-                    normalized_name = normalized_name[:-len(suffix)]
-                    break
+
+            # Iteratively remove suffixes and patterns until stable
+            changed = True
+            while changed:
+                changed = False
+                
+                # Check for explicit string suffixes (case-insensitive)
+                lower_name = normalized_name.lower()
+                for suffix in common_suffixes:
+                    if lower_name.endswith(suffix):
+                        normalized_name = normalized_name[:-len(suffix)]
+                        changed = True
+                        break # Restart to re-evaluate with new name
+                
+                if changed:
+                    continue
+
+                # Check for " copy" suffix
+                if lower_name.endswith(" copy"):
+                    normalized_name = normalized_name[:-5]
+                    changed = True
+                    continue
+
+                # Check for numbering pattern " (1)", " (23)" using regex
+                # Matches space + parenthesis + digits + parenthesis at end of string
+                m = re.search(r' \(\d+\)$', normalized_name)
+                if m:
+                    normalized_name = normalized_name[:m.start()]
+                    changed = True
+                    continue
+
+            # Final cleanup: strip trailing spaces/underscores that might be left
+            normalized_name = normalized_name.rstrip(' _')
 
             # Convert to lowercase for case-insensitive matching
             normalized_name = normalized_name.lower()

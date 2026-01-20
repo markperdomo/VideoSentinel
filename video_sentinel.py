@@ -321,6 +321,12 @@ def main():
     )
 
     parser.add_argument(
+        '--ignore-duration',
+        action='store_true',
+        help='Ignore video duration when checking for filename duplicates (useful if re-encoded files have slightly different lengths)'
+    )
+
+    parser.add_argument(
         '--fix-quicklook',
         action='store_true',
         help='Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)'
@@ -1247,10 +1253,21 @@ def main():
         print("="*80)
 
         # Use filename-based detection if requested, otherwise use perceptual hashing
+        failed_videos = []
         if args.filename_duplicates:
-            duplicate_groups = duplicate_detector.find_duplicates_by_filename(video_files, analyzer=analyzer)
+            duplicate_groups = duplicate_detector.find_duplicates_by_filename(
+                video_files, 
+                analyzer=analyzer,
+                check_duration=not args.ignore_duration
+            )
         else:
-            duplicate_groups = duplicate_detector.find_duplicates(video_files)
+            duplicate_groups, failed_videos = duplicate_detector.find_duplicates(video_files)
+
+        if failed_videos:
+            print()
+            print(f"{Colors.yellow('WARNING:')} The following {len(failed_videos)} files failed the integrity check (could not be read/hashed):")
+            for video in failed_videos:
+                print(f"  - {Colors.red(video.name)}")
 
         if duplicate_groups:
             print()
