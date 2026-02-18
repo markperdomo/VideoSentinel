@@ -96,6 +96,46 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Can filter to show only failed files with `--failed-only` flag
 - Useful for monitoring long-running queue mode sessions in a separate terminal
 
+**stats.py** (Video Library Statistics)
+- `StatsCollector` class: Collects and displays codec statistics for a video library
+- Scans directory (optionally recursive) and groups files by codec
+- Displays a formatted table showing each codec's total storage size and percentage
+- Depends on `VideoAnalyzer` for metadata extraction
+
+**sample_generator.py** (Sample Video Creation)
+- `create_sample_video()` function: Generates synthetic test pattern videos using FFmpeg
+- Creates 5-second `testsrc` videos for each unique codec/resolution combination found in a library
+- Tracks generated permutations in a module-level set to avoid duplicates
+- Maps codecs to FFmpeg encoders via `CODEC_TO_ENCODER` dict (supports 13+ codecs)
+- Maps encoders to container extensions via `ENCODER_TO_EXTENSION` dict
+- Output goes to `sample_video_files/` directory by default
+
+### Tdarr Integration Plugins
+
+Two JavaScript plugins extend VideoSentinel's encoding logic into the Tdarr distributed transcoding framework:
+
+**Tdarr_Plugin_MC93_Migz1FFMPEG_CPU_modified.js** (Bitrate-Based HEVC Transcode)
+- Modified version of Migz1FFMPEG plugin with Apple compatibility fixes
+- Calculates target bitrate as ~55% of source (H.265 efficiency assumption)
+- Uses two-pass-like approach: target bitrate with min/max bounds (±30%)
+- Skips files already in HEVC, VP9, or AV1 codecs
+- Remuxes (copy streams) if codec is modern but container doesn't match
+- Adds `-tag:v hvc1` for MP4 output (macOS QuickLook compatibility)
+- Configurable: container, bitrate cutoff, 10-bit output, force container conformance
+- Handles stream filtering (removes embedded images like mjpeg/png)
+
+**Tdarr_Plugin_vsAIQ.js** (VideoSentinel Intelligent Quality CRF)
+- Implements VideoSentinel's smart CRF quality algorithm as a Tdarr plugin
+- Calculates bits-per-pixel (bpp) from source bitrate, resolution, and framerate
+- Maps bpp to codec-specific CRF tiers (same algorithm as `encoder.py`)
+- Supports HEVC, H.264, and AV1 target codecs with configurable presets
+- Quality modifier input allows fine-tuning CRF up or down
+- 10-bit output support (p010le for HEVC/AV1, yuv420p10le for H.264)
+- Forces even pixel dimensions for HEVC via `scale=trunc(iw/2)*2:trunc(ih/2)*2`
+- Adds `-tag:v hvc1` for HEVC output (macOS QuickLook compatibility)
+- Built-in filter: skips files already in the target codec
+- Audio codec configurable: copy, aac, ac3, eac3, opus
+
 ### Key Design Patterns
 
 **Dataclasses for Type Safety**
