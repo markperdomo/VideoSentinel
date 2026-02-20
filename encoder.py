@@ -322,22 +322,24 @@ class VideoEncoder:
             # Compute file size once for memory-safe decisions
             file_size_gb = input_path.stat().st_size / (1024**3)
             is_large_file = file_size_gb > 4  # >4GB triggers memory-safe settings
+            is_very_large_file = file_size_gb > 10  # >10GB gets aggressive memory limits
 
             # Add OUTPUT recovery flags (AFTER -i)
             if self.recovery_mode:
                 # Set muxing queue size (conservative for large files)
-                max_queue_size = '512' if is_large_file else '1024'
+                max_queue_size = '256' if is_very_large_file else ('512' if is_large_file else '1024')
                 cmd.extend(['-max_muxing_queue_size', max_queue_size])
 
                 # Set max error rate to 100% (don't fail on errors)
                 cmd.extend(['-max_error_rate', '1.0'])
 
                 if self.verbose and is_large_file:
-                    console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings (queue:512, threads:4)", style="dim")
+                    console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings", style="dim")
 
             # Memory-safe muxing queue for large files in normal mode
             if not self.recovery_mode and is_large_file:
-                cmd.extend(['-max_muxing_queue_size', '512'])
+                max_queue_size = '256' if is_very_large_file else '512'
+                cmd.extend(['-max_muxing_queue_size', max_queue_size])
                 if self.verbose:
                     console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-safe muxing queue", style="dim")
 
@@ -349,9 +351,9 @@ class VideoEncoder:
                 '-c:a', audio_codec,
             ])
 
-            # Dynamic thread limiting for large files in recovery mode
-            if self.recovery_mode and is_large_file:
-                cmd.extend(['-threads', '4'])
+            # Note: FFmpeg's -threads flag is ignored by libx265 (x265 manages
+            # its own threading via -x265-params). Thread control for x265 is
+            # handled below via pools/frame-threads params.
 
 
             # Add audio filter to handle problematic channel layouts
@@ -389,14 +391,31 @@ class VideoEncoder:
                 cmd.extend(['-movflags', 'faststart'])
                 # Build x265 params
                 x265_params = ['log-level=error']
-                if is_large_file:
-                    # Memory-safe settings: limit thread pools and lookahead buffers
-                    # to prevent OOM on large high-res files
+                if is_very_large_file:
+                    # Aggressive memory-safe settings for very large files (>10GB)
+                    # bframes has quadratic memory impact, ref is linear per frame
+                    x265_params.extend([
+                        'pools=2',
+                        'frame-threads=1',
+                        'rc-lookahead=5',
+                        'bframes=2',
+                        'ref=1',
+                    ])
+                    if self.verbose:
+                        console.print(f"  Very large file ({file_size_gb:.1f}GB) - aggressive memory limits (1 frame-thread, bframes=2, ref=1)", style="dim")
+                elif is_large_file:
+                    # Memory-safe settings for large files (>4GB)
+                    # rc-lookahead (not lookahead-depth) controls lookahead buffer
+                    # bframes has quadratic memory impact - reduce from default 4
                     x265_params.extend([
                         'pools=4',
                         'frame-threads=2',
-                        'lookahead-depth=10',
+                        'rc-lookahead=10',
+                        'bframes=3',
+                        'ref=2',
                     ])
+                    if self.verbose:
+                        console.print(f"  Large file ({file_size_gb:.1f}GB) - memory-safe x265 params (2 frame-threads, bframes=3, ref=2)", style="dim")
                 cmd.extend(['-x265-params', ':'.join(x265_params)])
             elif target_codec.lower() == 'h264':
                 # Add H.264-specific parameters for maximum compatibility
@@ -427,9 +446,10 @@ class VideoEncoder:
                     console.print(f"  Command: {' '.join(cmd)}", style="dim")
 
                 # Run ffmpeg with streaming output to show real-time progress
+                # stdout=DEVNULL avoids deadlock (we only read stderr)
                 process = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     universal_newlines=True,
                     bufsize=1  # Line buffered
@@ -437,7 +457,9 @@ class VideoEncoder:
 
                 # Track progress
                 last_progress = None
+                # Only keep last N lines to avoid unbounded memory growth on long encodes
                 error_output = []
+                MAX_ERROR_LINES = 50
 
                 # Determine total duration for progress calculation
                 total_seconds = video_info.duration if video_info and video_info.duration > 0 else 0
@@ -485,6 +507,8 @@ class VideoEncoder:
                             break
 
                         error_output.append(line)
+                        if len(error_output) > MAX_ERROR_LINES:
+                            error_output.pop(0)
 
                         ffmpeg_progress = self._parse_ffmpeg_progress(line)
                         if ffmpeg_progress:
