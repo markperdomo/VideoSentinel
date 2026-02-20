@@ -7,7 +7,21 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List
 
+from rich.table import Table
 from video_analyzer import VideoAnalyzer, VideoInfo
+from ui import console
+
+
+def format_size(size_bytes):
+    """Format bytes as human-readable size."""
+    if size_bytes == 0:
+        return "0B"
+    size_names = ("B", "KB", "MB", "GB", "TB")
+    i = 0
+    while size_bytes >= 1024 and i < len(size_names) - 1:
+        size_bytes /= 1024
+        i += 1
+    return f"{size_bytes:.2f} {size_names[i]}"
 
 
 class StatsCollector:
@@ -39,40 +53,30 @@ class StatsCollector:
 
     def display_stats(self, codec_stats: Dict[str, int]):
         """
-        Displays the collected statistics in a table.
+        Displays the collected statistics as a Rich table.
 
         Args:
             codec_stats: A dictionary mapping codec to total byte size.
         """
         total_size = sum(codec_stats.values())
         if total_size == 0:
-            print("No video files found or analyzed.")
+            console.print("No video files found or analyzed.")
             return
 
         # Sort codecs by size in descending order
         sorted_codecs = sorted(codec_stats.items(), key=lambda item: item[1], reverse=True)
 
-        # Helper for formatting size
-        def format_size(size_bytes):
-            if size_bytes == 0:
-                return "0B"
-            size_names = ("B", "KB", "MB", "GB", "TB")
-            i = 0
-            while size_bytes >= 1024 and i < len(size_names) - 1:
-                size_bytes /= 1024
-                i += 1
-            return f"{size_bytes:.2f} {size_names[i]}"
+        table = Table(title="Video Library Statistics")
+        table.add_column("Codec", style="cyan", no_wrap=True)
+        table.add_column("Size", justify="right")
+        table.add_column("Percentage", justify="right")
 
-        # Print table header
-        print(f"{'Codec':<15} {'Size':<15} {'Percentage'}")
-        print("-" * 45)
-
-        # Print table rows
         for codec, size in sorted_codecs:
             percentage = (size / total_size) * 100
-            print(f"{codec:<15} {format_size(size):<15} {percentage:.2f}%")
+            table.add_row(codec, format_size(size), f"{percentage:.2f}%")
 
-        # Print total
-        print("-" * 45)
-        print(f"{'Total':<15} {format_size(total_size):<15} 100.00%")
+        # Footer row
+        table.add_section()
+        table.add_row("[bold]Total[/bold]", f"[bold]{format_size(total_size)}[/bold]", "[bold]100.00%[/bold]")
 
+        console.print(table)

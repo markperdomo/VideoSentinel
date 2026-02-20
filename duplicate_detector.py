@@ -9,7 +9,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Set
 from collections import defaultdict
-from tqdm import tqdm
+from ui import console, create_scan_progress
 
 
 class DuplicateDetector:
@@ -151,7 +151,7 @@ class DuplicateDetector:
 
             if not frames:
                 if self.verbose:
-                    tqdm.write(f"Warning: No frames extracted from: {video_path}")
+                    console.print(f"[warning]Warning: No frames extracted from: {video_path}[/warning]")
                 return None
 
             # Compute perceptual hash (phash) for each frame
@@ -165,7 +165,7 @@ class DuplicateDetector:
 
         except Exception as e:
             if self.verbose:
-                tqdm.write(f"Error computing hash for {video_path}: {e}")
+                console.print(f"[error]Error computing hash for {video_path}: {e}[/error]")
             return None
 
     def find_duplicates(self, video_paths: List[Path]) -> Tuple[Dict[str, List[Path]], List[Path]]:
@@ -184,16 +184,19 @@ class DuplicateDetector:
         video_hashes: Dict[Path, List[imagehash.ImageHash]] = {}
         failed_videos: List[Path] = []
 
-        for video_path in tqdm(video_paths, desc="Computing hashes", unit="video"):
-            hash_list = self.compute_video_hash(video_path)
-            if hash_list is not None:
-                video_hashes[video_path] = hash_list
-            else:
-                failed_videos.append(video_path)
+        with create_scan_progress() as progress:
+            task = progress.add_task("Computing hashes", total=len(video_paths))
+            for video_path in video_paths:
+                hash_list = self.compute_video_hash(video_path)
+                if hash_list is not None:
+                    video_hashes[video_path] = hash_list
+                else:
+                    failed_videos.append(video_path)
+                progress.advance(task)
 
-        tqdm.write(f"Successfully hashed {len(video_hashes)} videos")
+        console.print(f"Successfully hashed {len(video_hashes)} videos")
         if failed_videos:
-            tqdm.write(f"Failed to hash {len(failed_videos)} videos")
+            console.print(f"[warning]Failed to hash {len(failed_videos)} videos[/warning]")
 
         # Find similar videos based on average hash distance across frames
         duplicate_groups: Dict[str, List[Path]] = {}
@@ -331,7 +334,7 @@ class DuplicateDetector:
             changed = True
             while changed:
                 changed = False
-                
+
                 # Check for explicit string suffixes (case-insensitive)
                 lower_name = normalized_name.lower()
                 for suffix in common_suffixes:
@@ -339,7 +342,7 @@ class DuplicateDetector:
                         normalized_name = normalized_name[:-len(suffix)]
                         changed = True
                         break # Restart to re-evaluate with new name
-                
+
                 if changed:
                     continue
 
@@ -417,15 +420,15 @@ class DuplicateDetector:
                     if len(duration_groups) == 0 and len(videos) > 1:
                         filtered_count += 1
                         if self.verbose:
-                            tqdm.write(f"Filtered out '{normalized_name}': files have different durations")
+                            console.print(f"Filtered out '{normalized_name}': files have different durations", style="dim")
                 else:
                     # No duration checking, add all files with matching filenames
                     duplicate_groups[f"group_{group_id}"] = videos
                     group_id += 1
 
         if self.verbose:
-            tqdm.write(f"Found {len(duplicate_groups)} filename-based duplicate groups")
+            console.print(f"Found {len(duplicate_groups)} filename-based duplicate groups")
             if check_duration and analyzer is not None and filtered_count > 0:
-                tqdm.write(f"Filtered out {filtered_count} groups due to duration mismatch")
+                console.print(f"Filtered out {filtered_count} groups due to duration mismatch", style="dim")
 
         return duplicate_groups

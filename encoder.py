@@ -8,9 +8,9 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional, Dict
-from tqdm import tqdm
 from video_analyzer import VideoInfo
 from shutdown_manager import shutdown_requested
+from ui import console, section_header, create_encoding_progress
 
 
 class VideoEncoder:
@@ -61,45 +61,6 @@ class VideoEncoder:
             return hours * 3600 + minutes * 60 + seconds
         except:
             return 0.0
-
-    def _format_eta(self, seconds: float) -> str:
-        """
-        Format ETA in human-readable format
-
-        Args:
-            seconds: Remaining time in seconds
-
-        Returns:
-            Formatted string like "2m 30s" or "1h 5m"
-        """
-        if seconds <= 0:
-            return "0s"
-
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-
-        if hours > 0:
-            return f"{hours}h {minutes}m"
-        elif minutes > 0:
-            return f"{minutes}m {secs}s"
-        else:
-            return f"{secs}s"
-
-    def _create_progress_bar(self, percentage: float, width: int = 30) -> str:
-        """
-        Create a visual progress bar
-
-        Args:
-            percentage: Progress percentage (0-100)
-            width: Width of the progress bar in characters
-
-        Returns:
-            Progress bar string like "[████████░░░░░░]"
-        """
-        filled = int(width * percentage / 100)
-        empty = width - filled
-        return f"[{'█' * filled}{'░' * empty}]"
 
     def _parse_ffmpeg_progress(self, line: str) -> Optional[Dict[str, str]]:
         """
@@ -229,8 +190,8 @@ class VideoEncoder:
                 crf = 26
 
         if self.verbose:
-            tqdm.write(f"  Quality analysis: {bpp:.4f} bpp → CRF {crf}")
-            tqdm.write(f"  Source: {bitrate/1000:.0f} kbps, {video_info.width}x{video_info.height}, {fps:.1f} fps")
+            console.print(f"  Quality analysis: {bpp:.4f} bpp \u2192 CRF {crf}", style="dim")
+            console.print(f"  Source: {bitrate/1000:.0f} kbps, {video_info.width}x{video_info.height}, {fps:.1f} fps", style="dim")
 
         return crf
 
@@ -246,7 +207,9 @@ class VideoEncoder:
         replace_original: bool = False,
         video_info: Optional[VideoInfo] = None,
         current_index: Optional[int] = None,
-        total_count: Optional[int] = None
+        total_count: Optional[int] = None,
+        progress=None,
+        file_task=None
     ) -> bool:
         """
         Re-encode a video file with smart quality matching
@@ -264,18 +227,20 @@ class VideoEncoder:
             video_info: VideoInfo object for smart quality matching (optional)
             current_index: Current video index in batch (1-based, for display)
             total_count: Total number of videos in batch (for display)
+            progress: Optional Rich Progress instance from caller (avoids creating per-file progress)
+            file_task: Optional task ID within progress to update for this file's encoding
 
         Returns:
             True if encoding successful, False otherwise
         """
         if not input_path.exists():
-            print(f"Error: Input file does not exist: {input_path}")
+            console.print(f"[error]Error: Input file does not exist: {input_path}[/error]")
             return False
 
         # Get ffmpeg codec name
         ffmpeg_codec = self.CODEC_MAP.get(target_codec.lower())
         if not ffmpeg_codec:
-            print(f"Error: Unknown codec: {target_codec}")
+            console.print(f"[error]Error: Unknown codec: {target_codec}[/error]")
             return False
 
         # Calculate optimal CRF if not specified
@@ -283,11 +248,11 @@ class VideoEncoder:
             if video_info is not None:
                 crf = self.calculate_optimal_crf(video_info, target_codec)
                 if self.verbose:
-                    tqdm.write(f"  Using smart quality matching: CRF {crf}")
+                    console.print(f"  Using smart quality matching: CRF {crf}", style="dim")
             else:
                 crf = 23  # Default fallback
                 if self.verbose:
-                    tqdm.write(f"  Using default CRF: {crf}")
+                    console.print(f"  Using default CRF: {crf}", style="dim")
 
         # Create output directory if it doesn't exist
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,16 +262,16 @@ class VideoEncoder:
         if output_path.exists():
             existing_size = output_path.stat().st_size
             if self.verbose:
-                tqdm.write(f"  Found existing output file ({existing_size / (1024*1024):.1f} MB)")
+                console.print(f"  Found existing output file ({existing_size / (1024*1024):.1f} MB)", style="dim")
 
             # Validate existing file - if it's valid, skip re-encoding
             if self._validate_output(output_path, video_info, lenient=self.recovery_mode):
                 if self.verbose:
-                    tqdm.write(f"  Existing output is valid, skipping re-encode")
+                    console.print(f"  Existing output is valid, skipping re-encode", style="dim")
                 skip_encoding = True
             else:
                 if self.verbose:
-                    tqdm.write(f"  Existing output is invalid, removing and re-encoding")
+                    console.print(f"  Existing output is invalid, removing and re-encoding", style="dim")
                 output_path.unlink()
 
         # If we're replacing originals, check if replacement was already completed
@@ -318,7 +283,7 @@ class VideoEncoder:
             # If the final path exists and original doesn't, replacement was completed
             if final_path.exists() and final_path != input_path and not input_path.exists():
                 if self.verbose:
-                    tqdm.write(f"  Replacement already completed, skipping")
+                    console.print(f"  Replacement already completed, skipping", style="dim")
                 return True
 
             # If final path exists and is valid, and it's the same as output path,
@@ -326,7 +291,7 @@ class VideoEncoder:
             if final_path.exists() and final_path == output_path and input_path.exists() and input_path != final_path:
                 if self._validate_output(final_path, video_info, lenient=self.recovery_mode):
                     if self.verbose:
-                        tqdm.write(f"  Found valid final output, completing interrupted replacement")
+                        console.print(f"  Found valid final output, completing interrupted replacement", style="dim")
                     input_path.unlink()
                     return True
 
@@ -349,7 +314,7 @@ class VideoEncoder:
                 cmd.extend(['-ignore_unknown'])
 
                 if self.verbose:
-                    tqdm.write("  Recovery mode enabled: using error-tolerant FFmpeg flags")
+                    console.print("  Recovery mode enabled: using error-tolerant FFmpeg flags", style="dim")
 
             # Add input file
             cmd.extend(['-i', str(input_path)])
@@ -370,7 +335,7 @@ class VideoEncoder:
                 cmd.extend(['-max_error_rate', '1.0'])
 
                 if self.verbose and is_large_file:
-                    tqdm.write(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings (queue:512, threads:4)")
+                    console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings (queue:512, threads:4)", style="dim")
 
             # Continue with encoding parameters
             cmd.extend([
@@ -399,13 +364,13 @@ class VideoEncoder:
                 if video_info.width > 1920 or video_info.height > 1080:
                     vf_filters.append('scale=1920:1080:force_original_aspect_ratio=decrease')
                     if self.verbose:
-                        tqdm.write(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080")
+                        console.print(f"  Downscaling from {video_info.width}x{video_info.height} to fit within 1920x1080", style="dim")
 
             # For HEVC, ensure dimensions are divisible by 2 to avoid encoder errors
             if target_codec.lower() == 'hevc':
                 vf_filters.append('scale=trunc(iw/2)*2:trunc(ih/2)*2')
                 if self.verbose:
-                    tqdm.write("  Ensuring even dimensions for HEVC encoding")
+                    console.print("  Ensuring even dimensions for HEVC encoding", style="dim")
 
             # If any filters are defined, add them to the command
             if vf_filters:
@@ -439,17 +404,16 @@ class VideoEncoder:
                 str(output_path)
             ])
 
+        # Determine whether to use caller's progress or create our own
+        use_external_progress = progress is not None and file_task is not None
+
         try:
             if not skip_encoding:
-                # Display which file we're encoding with position in queue
-                if current_index and total_count:
-                    tqdm.write(f"[{current_index}/{total_count}] Encoding: {input_path.name}")
-                else:
-                    tqdm.write(f"Encoding: {input_path.name}")
-
                 if self.verbose:
-                    tqdm.write(f"  Output: {output_path.name}")
-                    tqdm.write(f"  Command: {' '.join(cmd)}")
+                    if current_index and total_count:
+                        console.print(f"[bold]\\[{current_index}/{total_count}][/bold] Encoding: [filename]{input_path.name}[/filename]")
+                    console.print(f"  Output: {output_path.name}", style="dim")
+                    console.print(f"  Command: {' '.join(cmd)}", style="dim")
 
                 # Run ffmpeg with streaming output to show real-time progress
                 process = subprocess.Popen(
@@ -464,142 +428,135 @@ class VideoEncoder:
                 last_progress = None
                 error_output = []
 
-                # Read stderr line by line (FFmpeg writes progress to stderr)
+                # Determine total duration for progress calculation
+                total_seconds = video_info.duration if video_info and video_info.duration > 0 else 0
+
+                # Read stderr line by line with Rich progress display
                 try:
+                    if use_external_progress:
+                        # Use the caller's Progress instance (batch mode)
+                        rich_progress = progress
+                        task = file_task
+                        # Reset the file task for this file
+                        if total_seconds > 0:
+                            rich_progress.update(task, description=f"  {input_path.name}", completed=0, total=1000, speed="", eta="")
+                        else:
+                            rich_progress.update(task, description=f"  {input_path.name}", completed=0, total=None, speed="", eta="")
+                    else:
+                        # Standalone mode - create our own Progress context
+                        rich_progress = create_encoding_progress()
+                        rich_progress.start()
+                        if total_seconds > 0:
+                            task = rich_progress.add_task(f"  {input_path.name}", total=1000, speed="", eta="")
+                        else:
+                            task = rich_progress.add_task(f"  {input_path.name}", total=None, speed="", eta="")
+
                     while True:
                         # Check for shutdown signal before reading line
                         if shutdown_requested():
-                            tqdm.write("\nShutdown requested, terminating encoding...")
+                            if not use_external_progress:
+                                rich_progress.stop()
+                                console.print("[warning]Shutdown requested, terminating encoding...[/warning]")
                             process.terminate()
-                            # Wait briefly for FFmpeg to exit gracefully
                             try:
                                 process.wait(timeout=5)
                             except subprocess.TimeoutExpired:
-                                process.kill() # Force kill if it doesn't respond
+                                process.kill()
                                 process.wait()
-                            
-                            # Clean up the partial file
+
                             if output_path.exists():
                                 output_path.unlink()
-                                tqdm.write(f"  Removed partial file: {output_path.name}")
-                            
-                            return False # Signal that encoding was stopped
+
+                            return False
 
                         line = process.stderr.readline()
                         if not line:
                             break
 
-                        # Store for error reporting
                         error_output.append(line)
 
-                        # Parse progress info
-                        progress = self._parse_ffmpeg_progress(line)
-                        if progress:
-                            last_progress = progress
+                        ffmpeg_progress = self._parse_ffmpeg_progress(line)
+                        if ffmpeg_progress:
+                            last_progress = ffmpeg_progress
 
-                            # Only show inline progress in non-verbose mode
-                            # In verbose mode, FFmpeg already outputs everything
                             if not self.verbose:
-                                # Display progress inline (overwrite same line)
-                                speed = progress.get('speed', '?')
-                                time_str = progress.get('time', '0:0:0')
+                                speed = ffmpeg_progress.get('speed', '?')
+                                time_str = ffmpeg_progress.get('time', '0:0:0')
+                                speed_display = f"{speed}x" if speed != '?' else ""
 
-                                # Calculate percentage and ETA if we have duration
-                                if video_info and video_info.duration > 0:
+                                if total_seconds > 0:
                                     current_seconds = self._parse_time_to_seconds(time_str)
-                                    total_seconds = video_info.duration
                                     percentage = min(100.0, (current_seconds / total_seconds) * 100)
 
-                                    # Calculate ETA if we have speed
-                                    eta_str = ""
+                                    eta_display = ""
                                     try:
                                         speed_float = float(speed) if speed != '?' else 0
                                         if speed_float > 0:
-                                            remaining_seconds = (total_seconds - current_seconds) / speed_float
-                                            eta_str = f" | ETA: {self._format_eta(remaining_seconds)}"
-                                    except:
+                                            remaining = (total_seconds - current_seconds) / speed_float
+                                            mins, secs = divmod(int(remaining), 60)
+                                            hours, mins = divmod(mins, 60)
+                                            if hours > 0:
+                                                eta_display = f"ETA: {hours}h {mins}m"
+                                            elif mins > 0:
+                                                eta_display = f"ETA: {mins}m {secs}s"
+                                            else:
+                                                eta_display = f"ETA: {secs}s"
+                                    except (ValueError, ZeroDivisionError):
                                         pass
 
-                                    # Create progress bar with percentage
-                                    progress_bar = self._create_progress_bar(percentage, width=25)
-                                    progress_msg = f"  {progress_bar} {percentage:5.1f}% | {speed}x speed{eta_str}"
+                                    rich_progress.update(task, completed=int(percentage * 10), speed=speed_display, eta=eta_display)
                                 else:
-                                    # Fallback to time-based display if no duration
-                                    progress_msg = f"  Encoding: {time_str} | {speed}x speed"
-
-                                # Use ANSI escape sequences for more reliable line overwriting
-                                # \r = carriage return, \033[K = clear to end of line
-                                # This works more reliably in tmux/screen than just \r
-                                print(f"\r\033[K{progress_msg}", end='', flush=True)
+                                    rich_progress.update(task, speed=speed_display, eta=time_str)
                         elif self.verbose and line.strip():
-                            # In verbose mode, show ALL ffmpeg output
-                            tqdm.write(f"  {line.rstrip()}")
+                            console.print(f"  {line.rstrip()}", style="dim")
 
-                    # Wait for process to complete
                     process.wait()
 
+                    if not use_external_progress:
+                        rich_progress.stop()
+
                 except KeyboardInterrupt:
-                    # User pressed Ctrl+C, terminate FFmpeg gracefully
-                    tqdm.write("\nUser interrupted, terminating encoding...")
+                    if not use_external_progress:
+                        rich_progress.stop()
                     process.terminate()
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-                    
-                    # Clean up the partial file
+
                     if output_path.exists():
                         output_path.unlink()
-                        tqdm.write(f"  Removed partial file: {output_path.name}")
-                        
-                    return False # Treat interruption as a failure for queue management
 
-                # Clear the progress line before printing completion message
-                # Only needed if we were showing inline progress (non-verbose mode)
-                if last_progress and not self.verbose:
-                    # Clear the line by printing spaces, then move to start of line
-                    print("\r" + " " * 100 + "\r", end='', flush=True)
+                    # Re-raise so callers (batch_re_encode, main) can handle it
+                    raise
 
                 # Check return code
                 if process.returncode != 0:
-                    if current_index and total_count:
-                        tqdm.write(f"✗ [{current_index}/{total_count}] Error encoding {input_path.name}")
-                    else:
-                        tqdm.write(f"Error encoding {input_path.name}")
-                    # Show last few error lines
-                    for line in error_output[-10:]:
-                        if line.strip():
-                            tqdm.write(f"  {line.rstrip()}")
+                    if not use_external_progress:
+                        console.print(f"[error]\u2717 Error encoding {input_path.name}[/error]")
+                        for line in error_output[-10:]:
+                            if line.strip():
+                                console.print(f"  {line.rstrip()}", style="dim")
                     return False
 
                 # Validate output before considering it successful
                 if not self._validate_output(output_path, video_info, lenient=self.recovery_mode):
-                    if current_index and total_count:
-                        tqdm.write(f"✗ [{current_index}/{total_count}] Output validation failed for {input_path.name}")
-                    else:
-                        tqdm.write(f"Error: Output validation failed for {output_path.name}")
-                    # Remove invalid output file
+                    if not use_external_progress:
+                        console.print(f"[error]\u2717 Output validation failed for {input_path.name}[/error]")
                     if output_path.exists():
                         output_path.unlink()
                     return False
 
-                # Show final encoding stats
-                if last_progress:
+                # Show final encoding stats (only in standalone mode)
+                if not use_external_progress and last_progress:
                     fps = last_progress.get('fps', '?')
                     speed = last_progress.get('speed', '?')
-                    if current_index and total_count:
-                        tqdm.write(f"✓ [{current_index}/{total_count}] Completed: {input_path.name} (avg {fps} fps, {speed}x speed)")
-                    else:
-                        tqdm.write(f"✓ Completed: {input_path.name} (avg {fps} fps, {speed}x speed)")
-                elif self.verbose:
-                    tqdm.write(f"Successfully encoded and validated: {output_path}")
+                    console.print(f"[success]\u2713 Completed: {input_path.name}[/success] [dim](avg {fps} fps, {speed}x speed)[/dim]")
             else:
-                # Skipped encoding, but show we're resuming
-                if current_index and total_count:
-                    tqdm.write(f"[{current_index}/{total_count}] Resuming: {input_path.name} (already encoded)")
-                else:
-                    tqdm.write(f"Resuming: {input_path.name} (already encoded)")
+                # Skipped encoding (valid output already exists)
+                if not use_external_progress:
+                    console.print(f"Resuming: [filename]{input_path.name}[/filename] [dim](already encoded)[/dim]")
 
             # Handle file replacement logic (only after successful validation)
             if replace_original:
@@ -616,12 +573,12 @@ class VideoEncoder:
                     # (This handles the case where source was already .mp4)
                     if final_path.exists():
                         if self.verbose:
-                            tqdm.write(f"Removing existing file at target: {final_path}")
+                            console.print(f"Removing existing file at target: {final_path}", style="dim")
                         final_path.unlink()
 
                     # Rename output to final path
                     if self.verbose:
-                        tqdm.write(f"Renaming {output_path.name} -> {final_path.name}")
+                        console.print(f"Renaming {output_path.name} -> {final_path.name}", style="dim")
                     output_path.rename(final_path)
 
                 # Delete original input file if it's different from the final path
@@ -630,21 +587,21 @@ class VideoEncoder:
                 # deleted in the block above when we cleared the destination.
                 if input_path.exists() and input_path != final_path:
                     if self.verbose:
-                        tqdm.write(f"Removing original source: {input_path}")
+                        console.print(f"Removing original source: {input_path}", style="dim")
                     input_path.unlink()
             elif not keep_original:
                 # Legacy behavior: just remove original without renaming
                 if self.verbose:
-                    tqdm.write(f"Removing original: {input_path}")
+                    console.print(f"Removing original: {input_path}", style="dim")
                 input_path.unlink()
 
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"Error: Encoding timeout for {input_path.name}")
+            console.print(f"[error]Error: Encoding timeout for {input_path.name}[/error]")
             return False
         except Exception as e:
-            print(f"Error encoding {input_path.name}: {e}")
+            console.print(f"[error]Error encoding {input_path.name}: {e}[/error]")
             return False
 
     def _validate_output(
@@ -670,13 +627,13 @@ class VideoEncoder:
             # Check 1: File exists and has size
             if not output_path.exists():
                 if self.verbose:
-                    tqdm.write(f"  Validation failed: Output file does not exist")
+                    console.print(f"  Validation failed: Output file does not exist", style="dim")
                 return False
 
             file_size = output_path.stat().st_size
             if file_size < 1024:  # Less than 1KB is definitely wrong
                 if self.verbose:
-                    tqdm.write(f"  Validation failed: Output file too small ({file_size} bytes)")
+                    console.print(f"  Validation failed: Output file too small ({file_size} bytes)", style="dim")
                 return False
 
             # Check 2: Can be read by ffprobe
@@ -693,7 +650,7 @@ class VideoEncoder:
 
             if result.returncode != 0:
                 if self.verbose:
-                    tqdm.write(f"  Validation failed: ffprobe cannot read output")
+                    console.print(f"  Validation failed: ffprobe cannot read output", style="dim")
                 return False
 
             data = json.loads(result.stdout)
@@ -707,7 +664,7 @@ class VideoEncoder:
 
             if not video_stream:
                 if self.verbose:
-                    tqdm.write(f"  Validation failed: No video stream in output")
+                    console.print(f"  Validation failed: No video stream in output", style="dim")
                 return False
 
             # Check 4: Has valid dimensions
@@ -716,7 +673,7 @@ class VideoEncoder:
 
             if width == 0 or height == 0:
                 if self.verbose:
-                    tqdm.write(f"  Validation failed: Invalid dimensions ({width}x{height})")
+                    console.print(f"  Validation failed: Invalid dimensions ({width}x{height})", style="dim")
                 return False
 
             # Check 5: Compare duration with source (if available)
@@ -728,10 +685,10 @@ class VideoEncoder:
                     if lenient:
                         # In recovery mode, allow files with no duration metadata
                         if self.verbose:
-                            tqdm.write(f"  Validation passed (lenient): {width}x{height}, no duration metadata (recovered file)")
+                            console.print(f"  Validation passed (lenient): {width}x{height}, no duration metadata (recovered file)", style="dim")
                     else:
                         if self.verbose:
-                            tqdm.write(f"  Validation failed: Output has no duration")
+                            console.print(f"  Validation failed: Output has no duration", style="dim")
                         return False
                 else:
                     duration_diff = abs(output_duration - source_info.duration)
@@ -740,28 +697,28 @@ class VideoEncoder:
                             # In recovery mode, allow significant duration differences
                             # Just warn but don't fail - corrupted source may have wrong duration metadata
                             if self.verbose:
-                                tqdm.write(f"  Validation passed (lenient): {width}x{height}, {output_duration:.1f}s (source was {source_info.duration:.1f}s, recovered file may differ)")
+                                console.print(f"  Validation passed (lenient): {width}x{height}, {output_duration:.1f}s (source was {source_info.duration:.1f}s, recovered file may differ)", style="dim")
                         else:
                             if self.verbose:
-                                tqdm.write(f"  Validation failed: Duration mismatch ({output_duration:.1f}s vs {source_info.duration:.1f}s)")
+                                console.print(f"  Validation failed: Duration mismatch ({output_duration:.1f}s vs {source_info.duration:.1f}s)", style="dim")
                             return False
                     else:
                         if self.verbose:
-                            tqdm.write(f"  Validation passed: {width}x{height}, {output_duration:.1f}s")
+                            console.print(f"  Validation passed: {width}x{height}, {output_duration:.1f}s", style="dim")
             else:
                 # No source info to compare against
                 if self.verbose:
-                    tqdm.write(f"  Validation passed: {width}x{height} (no source comparison)")
+                    console.print(f"  Validation passed: {width}x{height} (no source comparison)", style="dim")
 
             return True
 
         except subprocess.TimeoutExpired:
             if self.verbose:
-                tqdm.write(f"  Validation failed: ffprobe timeout")
+                console.print(f"  Validation failed: ffprobe timeout", style="dim")
             return False
         except Exception as e:
             if self.verbose:
-                tqdm.write(f"  Validation failed: {str(e)}")
+                console.print(f"  Validation failed: {str(e)}", style="dim")
             return False
 
     def get_output_path(
@@ -818,44 +775,49 @@ class VideoEncoder:
             Dictionary mapping input paths to success status
         """
         results = {}
+        failed_files = []
         total = len(video_paths)
 
-        for idx, video_path in enumerate(video_paths, start=1):
-            # Check for graceful shutdown request
-            if shutdown_requested():
-                print("="*60)
-                print("SHUTDOWN REQUESTED - Stopping after current video")
-                print("="*60)
-                print(f"Processed {idx - 1}/{total} videos before shutdown")
-                break
+        try:
+            with create_encoding_progress() as batch_progress:
+                overall_task = batch_progress.add_task("Encoding batch", total=total, speed="", eta="")
+                file_task = batch_progress.add_task("", total=None, speed="", eta="")
 
-            output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
+                for idx, video_path in enumerate(video_paths, start=1):
+                    # Check for graceful shutdown request
+                    if shutdown_requested():
+                        break
 
-            # Get video info for this video if available
-            video_info = video_infos.get(video_path) if video_infos else None
+                    output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
+                    video_info = video_infos.get(video_path) if video_infos else None
 
-            success = self.re_encode_video(
-                video_path,
-                output_path,
-                target_codec=target_codec,
-                video_info=video_info,
-                current_index=idx,
-                total_count=total,
-                **kwargs
-            )
+                    result = self.re_encode_video(
+                        video_path,
+                        output_path,
+                        target_codec=target_codec,
+                        video_info=video_info,
+                        current_index=idx,
+                        total_count=total,
+                        progress=batch_progress,
+                        file_task=file_task,
+                        **kwargs
+                    )
 
-            results[video_path] = success
+                    results[video_path] = result
+                    if not result:
+                        failed_files.append(video_path)
 
-            # Don't duplicate the success message (already shown in re_encode_video)
-            if not success:
-                tqdm.write(f"✗ [{idx}/{total}] Failed: {video_path.name}")
+                    batch_progress.update(overall_task, completed=idx, speed="", eta="")
+        except KeyboardInterrupt:
+            console.print("\n[warning]Interrupted by user.[/warning]")
 
-        # Print summary
+        # Print summary after progress bar is gone
         successful = sum(1 for v in results.values() if v)
-        print()
-        print("="*60)
-        print(f"Re-encoding complete: {successful}/{len(video_paths)} successful")
-        print("="*60)
+        section_header(f"Re-encoding complete: {successful}/{total} successful")
+        if failed_files:
+            console.print("[error]Failed files:[/error]")
+            for f in failed_files:
+                console.print(f"  [error]\u2717[/error] {f.name}")
 
         return results
 
@@ -943,12 +905,12 @@ class VideoEncoder:
                 # Validate the existing output
                 if self._validate_output(potential_output, source_info=None, lenient=self.recovery_mode):
                     if self.verbose:
-                        tqdm.write(f"  Found valid existing output: {potential_output.name}")
+                        console.print(f"  Found valid existing output: {potential_output.name}", style="dim")
                     return potential_output
                 else:
                     # Invalid output found - remove it
                     if self.verbose:
-                        tqdm.write(f"  Found invalid output, removing: {potential_output.name}")
+                        console.print(f"  Found invalid output, removing: {potential_output.name}", style="dim")
                     potential_output.unlink()
 
         return None
@@ -994,7 +956,7 @@ class VideoEncoder:
             True if remux successful, False otherwise
         """
         if not input_path.exists():
-            print(f"Error: Input file does not exist: {input_path}")
+            console.print(f"[error]Error: Input file does not exist: {input_path}[/error]")
             return False
 
         try:
@@ -1017,7 +979,7 @@ class VideoEncoder:
             cmd.append(str(output_path))
 
             if self.verbose:
-                tqdm.write(f"Remuxing: {input_path.name} -> {output_path.name}")
+                console.print(f"Remuxing: {input_path.name} -> {output_path.name}", style="dim")
 
             # Run ffmpeg
             result = subprocess.run(
@@ -1029,25 +991,25 @@ class VideoEncoder:
 
             if result.returncode != 0:
                 if self.verbose:
-                    tqdm.write(f"Remux failed for {input_path.name}: {result.stderr}")
+                    console.print(f"[error]Remux failed for {input_path.name}: {result.stderr}[/error]")
                 return False
 
             # Validate output
             if not output_path.exists() or output_path.stat().st_size < 1024:
                 if self.verbose:
-                    tqdm.write(f"Remux output validation failed for {input_path.name}")
+                    console.print(f"[error]Remux output validation failed for {input_path.name}[/error]")
                 if output_path.exists():
                     output_path.unlink()
                 return False
 
             if self.verbose:
-                tqdm.write(f"✓ Remuxed: {input_path.name}")
+                console.print(f"[success]\u2713 Remuxed: {input_path.name}[/success]")
 
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"Error: Remux timeout for {input_path.name}")
+            console.print(f"[error]Error: Remux timeout for {input_path.name}[/error]")
             return False
         except Exception as e:
-            print(f"Error remuxing {input_path.name}: {e}")
+            console.print(f"[error]Error remuxing {input_path.name}: {e}[/error]")
             return False

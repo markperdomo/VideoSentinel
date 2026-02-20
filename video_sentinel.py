@@ -13,7 +13,6 @@ import argparse
 import sys
 from pathlib import Path
 from typing import List, Optional
-from tqdm import tqdm
 
 from video_analyzer import VideoAnalyzer, VideoInfo
 from duplicate_detector import DuplicateDetector
@@ -23,36 +22,7 @@ from network_queue_manager import NetworkQueueManager
 from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
 from stats import StatsCollector
 from sample_generator import create_sample_video
-
-
-
-# ANSI color codes for terminal output
-class Colors:
-    """ANSI color codes for terminal output"""
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    BOLD = '\033[1m'
-    RESET = '\033[0m'
-
-    @staticmethod
-    def green(text):
-        return f"{Colors.GREEN}{text}{Colors.RESET}"
-
-    @staticmethod
-    def red(text):
-        return f"{Colors.RED}{text}{Colors.RESET}"
-
-    @staticmethod
-    def yellow(text):
-        return f"{Colors.YELLOW}{text}{Colors.RESET}"
-
-    @staticmethod
-    def bold(text):
-        return f"{Colors.BOLD}{text}{Colors.RESET}"
+from ui import console, section_header, success, error, warning, create_scan_progress, create_batch_progress
 
 
 def rank_video_quality(video_path: Path, video_info: VideoInfo, analyzer: VideoAnalyzer = None) -> int:
@@ -172,7 +142,7 @@ def handle_duplicate_group(
             video_infos[video] = info
 
     if not video_infos:
-        print(f"  {Colors.yellow('Warning: Could not analyze videos in this group')}")
+        console.print(f"  [warning]\u26a0 Warning: Could not analyze videos in this group[/warning]")
         return to_delete, to_keep
 
     # Rank videos by quality (including QuickLook compatibility and container preferences)
@@ -188,14 +158,14 @@ def handle_duplicate_group(
         to_keep = best_video
         to_delete = [v for v in ranked_videos if v != best_video]
 
-        print(f"  {Colors.green('✓ Keeping:')} {best_video.name}")
+        console.print(f"  [success]\u2713 Keeping:[/success] {best_video.name}")
         info = video_infos[best_video]
 
         # Check QuickLook compatibility for the kept file
         compat = analyzer.check_quicklook_compatibility(best_video)
-        ql_status = " [QuickLook ✓]" if compat.get('compatible') else ""
+        ql_status = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
-        print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
+        console.print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
 
         for video in to_delete:
             info = video_infos[video]
@@ -203,35 +173,35 @@ def handle_duplicate_group(
 
             # Check QuickLook compatibility for files being deleted
             compat = analyzer.check_quicklook_compatibility(video)
-            ql_status = " [QuickLook ✓]" if compat.get('compatible') else ""
+            ql_status = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
-            print(f"  {Colors.red('✗ Deleting:')} {video.name} ({file_size_mb:.2f} MB)")
-            print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
+            console.print(f"  [error]\u2717 Deleting:[/error] {video.name} ({file_size_mb:.2f} MB)")
+            console.print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
 
     elif action == 'interactive':
         # Show options and let user choose
-        print()
-        print(f"{Colors.bold(group_name)} - {len(videos)} duplicates found:")
-        print()
+        console.print()
+        console.print(f"[bold]{group_name}[/bold] - {len(videos)} duplicates found:")
+        console.print()
 
         for idx, video in enumerate(ranked_videos, 1):
             info = video_infos[video]
             file_size_mb = video.stat().st_size / (1024 * 1024)
-            quality_rank = "★ BEST" if idx == 1 else f"  #{idx}"
+            quality_rank = "\u2605 BEST" if idx == 1 else f"  #{idx}"
 
             # Check QuickLook compatibility
             compat = analyzer.check_quicklook_compatibility(video)
-            ql_badge = " [QuickLook ✓]" if compat.get('compatible') else ""
+            ql_badge = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
-            print(f"  {quality_rank} [{idx}] {video.name}{ql_badge}")
-            print(f"      Codec: {info.codec.upper()}, Resolution: {info.width}x{info.height}")
-            print(f"      Bitrate: {info.bitrate//1000} kbps, Size: {file_size_mb:.2f} MB")
-            print()
+            console.print(f"  {quality_rank} [{idx}] {video.name}{ql_badge}")
+            console.print(f"      Codec: {info.codec.upper()}, Resolution: {info.width}x{info.height}")
+            console.print(f"      Bitrate: {info.bitrate//1000} kbps, Size: {file_size_mb:.2f} MB")
+            console.print()
 
-        print(f"Options:")
-        print(f"  1-{len(ranked_videos)}: Keep that video, delete others")
-        print(f"  0 or Enter: Keep all (no action)")
-        print()
+        console.print(f"Options:")
+        console.print(f"  1-{len(ranked_videos)}: Keep that video, delete others")
+        console.print(f"  0 or Enter: Keep all (no action)")
+        console.print()
 
         choice = input(f"Your choice: ").strip('\r\n\t ').replace('\r', '').replace('\n', '')
 
@@ -241,13 +211,13 @@ def handle_duplicate_group(
             to_keep = keep_video
             to_delete = [v for v in ranked_videos if v != keep_video]
 
-            print()
-            print(f"  {Colors.green('✓ Keeping:')} {keep_video.name}")
+            console.print()
+            console.print(f"  [success]\u2713 Keeping:[/success] {keep_video.name}")
             for video in to_delete:
                 file_size_mb = video.stat().st_size / (1024 * 1024)
-                print(f"  {Colors.red('✗ Will delete:')} {video.name} ({file_size_mb:.2f} MB)")
+                console.print(f"  [error]\u2717 Will delete:[/error] {video.name} ({file_size_mb:.2f} MB)")
         else:
-            print(f"  {Colors.yellow('→ No action, keeping all')}")
+            console.print(f"  [warning]\u2192 No action, keeping all[/warning]")
 
     return to_delete, to_keep
 
@@ -329,7 +299,7 @@ def main():
     parser.add_argument(
         '--fix-quicklook',
         action='store_true',
-        help='Fix QuickLook compatibility (remux MKV→MP4, fix HEVC tags, re-encode if needed)'
+        help='Fix QuickLook compatibility (remux MKV\u2192MP4, fix HEVC tags, re-encode if needed)'
     )
 
     parser.add_argument(
@@ -454,9 +424,7 @@ def main():
 
     # Handle --clear-queue flag (can be used standalone)
     if args.clear_queue:
-        print("="*80)
-        print("CLEARING QUEUE STATE")
-        print("="*80)
+        section_header("CLEARING QUEUE STATE")
 
         queue_manager = NetworkQueueManager(
             temp_dir=args.temp_dir,
@@ -467,49 +435,48 @@ def main():
         state_file = queue_manager.state_file
 
         if state_file.exists():
-            print(f"Removing state file: {state_file}")
+            console.print(f"Removing state file: {state_file}")
             state_file.unlink()
         else:
-            print(f"No state file found at: {state_file}")
+            console.print(f"No state file found at: {state_file}")
 
         # Count and remove temp files
         temp_files = list(temp_dir.glob("*"))
         if temp_files:
             total_size = sum(f.stat().st_size for f in temp_files if f.is_file())
-            print(f"Removing {len(temp_files)} temp files ({total_size / (1024**2):.2f} MB)")
+            console.print(f"Removing {len(temp_files)} temp files ({total_size / (1024**2):.2f} MB)")
             queue_manager.cleanup()
-            print(f"{Colors.green('✓')} Queue cleared successfully")
+            console.print("[success]\u2713 Queue cleared successfully[/success]")
         else:
-            print("No temp files found")
+            console.print("No temp files found")
 
-        print("="*80)
         sys.exit(0)
 
     if not args.paths and not args.file_list and not args.clear_queue:
-        print(f"Error: Path argument or --file-list is required (provide one or more video files/directories or a file list)", file=sys.stderr)
+        console.print(f"[error]Error: Path argument or --file-list is required (provide one or more video files/directories or a file list)[/error]", highlight=False)
         parser.print_help()
         sys.exit(1)
 
     if args.paths and args.file_list:
-        print(f"Error: Cannot use --file-list with positional path arguments simultaneously. Choose one or the other.", file=sys.stderr)
+        console.print(f"[error]Error: Cannot use --file-list with positional path arguments simultaneously. Choose one or the other.[/error]", highlight=False)
         sys.exit(1)
 
     # Validate input paths (required unless using --clear-queue or --file-list)
     if args.paths:
         for path in args.paths:
             if not path.exists():
-                print(f"Error: Path '{path}' does not exist", file=sys.stderr)
+                console.print(f"[error]Error: Path '{path}' does not exist[/error]", highlight=False)
                 sys.exit(1)
             if not path.is_file() and not path.is_dir():
-                print(f"Error: '{path}' is not a valid file or directory", file=sys.stderr)
+                console.print(f"[error]Error: '{path}' is not a valid file or directory[/error]", highlight=False)
                 sys.exit(1)
-    
+
     if args.file_list:
         if not args.file_list.exists():
-            print(f"Error: File list '{args.file_list}' does not exist", file=sys.stderr)
+            console.print(f"[error]Error: File list '{args.file_list}' does not exist[/error]", highlight=False)
             sys.exit(1)
         if not args.file_list.is_file():
-            print(f"Error: '{args.file_list}' is not a valid file", file=sys.stderr)
+            console.print(f"[error]Error: '{args.file_list}' is not a valid file[/error]", highlight=False)
             sys.exit(1)
 
 
@@ -526,22 +493,20 @@ def main():
         args.check_specs = True
         args.find_duplicates = True
         args.check_issues = True
-    
+
     # Handle stats separately
     if args.stats:
-        print("="*80)
-        print("Video Library Statistics")
-        print("="*80)
-        
+        section_header("Video Library Statistics")
+
         analyzer = VideoAnalyzer(verbose=args.verbose)
         stats_collector = StatsCollector(analyzer)
-        
+
         for path in args.paths:
-            print(f"Processing path: {path}")
+            console.print(f"Processing path: {path}")
             codec_stats = stats_collector.collect_stats(path, args.recursive)
             stats_collector.display_stats(codec_stats)
-            print()
-            
+            console.print()
+
         analyzer.save_cache()
         sys.exit(0)
 
@@ -549,28 +514,24 @@ def main():
     # Check ffmpeg availability
     encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover, downscale_1080p=args.downscale_1080p)
     if not encoder.check_ffmpeg_available():
-        print("Error: ffmpeg is not installed or not in PATH", file=sys.stderr)
-        print("Please install ffmpeg to use VideoSentinel", file=sys.stderr)
+        console.print("[error]Error: ffmpeg is not installed or not in PATH[/error]", highlight=False)
+        console.print("[error]Please install ffmpeg to use VideoSentinel[/error]", highlight=False)
         sys.exit(1)
 
-    print("="*80)
-    print(f"VideoSentinel - Video Library Manager")
-    print("="*80)
+    section_header("VideoSentinel - Video Library Manager")
 
     if args.paths:
-        print(f"Processing {len(args.paths)} paths:")
+        console.print(f"Processing {len(args.paths)} paths:")
         for path in args.paths:
-            print(f"  - {path}")
-        print(f"Recursive scan: {args.recursive}")
+            console.print(f"  - {path}")
+        console.print(f"Recursive scan: {args.recursive}")
     elif args.file_list:
-        print(f"Processing videos from file list: {args.file_list}")
+        console.print(f"Processing videos from file list: {args.file_list}")
     else:
-        print("No specific paths or file list provided for processing (e.g., --clear-queue was used).")
+        console.print("No specific paths or file list provided for processing (e.g., --clear-queue was used).")
 
-    
-    print(f"Target codec: {args.target_codec.upper()}")
-    print("="*80)
-    print()
+    console.print(f"Target codec: [codec]{args.target_codec.upper()}[/codec]")
+    console.print()
 
     # Initialize components
     # If downscale_1080p enabled, mark videos >1080p as non-compliant
@@ -586,12 +547,12 @@ def main():
             ext.strip().lower().lstrip('.')
             for ext in args.file_types.split(',')
         ]
-        print(f"File type filter: {', '.join(file_types_filter).upper()}")
+        console.print(f"File type filter: {', '.join(file_types_filter).upper()}")
 
     # Find all video files from the provided paths or file list
     video_files = []
     if args.file_list:
-        print(f"Reading video paths from: {args.file_list}")
+        console.print(f"Reading video paths from: {args.file_list}")
         try:
             with open(args.file_list, 'r') as f:
                 for line in f:
@@ -602,19 +563,19 @@ def main():
                             video_files.append(video_path)
                         else:
                             if args.verbose:
-                                print(f"Skipping invalid or non-video entry in file list: {path_str}")
+                                console.print(f"Skipping invalid or non-video entry in file list: {path_str}", style="dim")
         except Exception as e:
-            print(f"Error reading file list '{args.file_list}': {e}", file=sys.stderr)
+            console.print(f"[error]Error reading file list '{args.file_list}': {e}[/error]", highlight=False)
             sys.exit(1)
     elif args.paths:
-        print("Finding video files...")
+        console.print("Finding video files...")
         for path in args.paths:
             if path.is_file():
                 if path.suffix.lower() in analyzer.VIDEO_EXTENSIONS:
                     video_files.append(path)
                 else:
                     if args.verbose:
-                        print(f"Skipping non-video file: {path}")
+                        console.print(f"Skipping non-video file: {path}", style="dim")
             elif path.is_dir():
                 video_files.extend(analyzer.find_videos(
                     path,
@@ -625,54 +586,52 @@ def main():
     # Note: For re-encoding operations, max-files limit is applied AFTER filtering
     # to files that need encoding (smarter behavior). For other operations, apply it here.
     if args.max_files and not args.re_encode and len(video_files) > args.max_files:
-        print(f"Limiting to first {args.max_files} files (found {len(video_files)} total)")
+        console.print(f"Limiting to first {args.max_files} files (found {len(video_files)} total)")
         video_files = video_files[:args.max_files]
 
     if not video_files:
         if file_types_filter:
-            print(f"No video files found matching types: {', '.join(file_types_filter).upper()}")
+            console.print(f"No video files found matching types: {', '.join(file_types_filter).upper()}")
         else:
-            print("No video files found.")
+            console.print("No video files found.")
         sys.exit(0)
 
-    print(f"Found {len(video_files)} video files")
-    print()
+    console.print(f"Found {len(video_files)} video files")
+    console.print()
 
     # Create samples if requested
     if args.create_samples:
-        print("="*80)
-        print("CREATING SAMPLE VIDEOS")
-        print("="*80)
-        print()
+        section_header("CREATING SAMPLE VIDEOS")
 
-        for video_path in tqdm(video_files, desc="Generating samples", unit="video"):
-            video_info = analyzer.get_video_info(video_path)
-            if video_info and video_info.is_valid:
-                create_sample_video(video_info)
-        
+        with create_scan_progress() as progress:
+            task = progress.add_task("Generating samples", total=len(video_files))
+            for video_path in video_files:
+                video_info = analyzer.get_video_info(video_path)
+                if video_info and video_info.is_valid:
+                    create_sample_video(video_info)
+                progress.advance(task)
+
         analyzer.save_cache()
-        print("\nSample creation process complete.")
+        console.print("\nSample creation process complete.")
         sys.exit(0)
 
     if args.force_remux_mkv:
-        print("="*80)
-        print("FORCE REMUX MKV TO MP4")
+        subtitle = None
         if args.replace_original:
-            print("⚠️  REPLACE MODE: Original MKV files will be deleted and replaced with MP4")
-        print("="*80)
-        print()
+            subtitle = "\u26a0\ufe0f  REPLACE MODE: Original MKV files will be deleted and replaced with MP4"
+        section_header("FORCE REMUX MKV TO MP4", subtitle)
 
         videos_to_remux = [p for p in video_files if p.suffix.lower() == '.mkv']
 
         if not videos_to_remux:
-            print("No MKV files found to remux.")
+            console.print("No MKV files found to remux.")
             sys.exit(0)
 
-        print(f"Found {len(videos_to_remux)} MKV files to remux.")
-        print()
+        console.print(f"Found {len(videos_to_remux)} MKV files to remux.")
+        console.print()
 
         if args.queue_mode:
-            print("QUEUE MODE ENABLED")
+            console.print("[bold]QUEUE MODE ENABLED[/bold]")
             queue_manager = NetworkQueueManager(
                 temp_dir=args.temp_dir,
                 max_buffer_size=args.buffer_size,
@@ -681,174 +640,161 @@ def main():
                 replace_original=args.replace_original
             )
             if queue_manager.load_state():
-                print("Resumed from previous session\n")
-            
+                console.print("Resumed from previous session\n")
+
             queue_manager.add_files(videos_to_remux)
 
-            current_idx = [0]
-            total = len(videos_to_remux)
-
-            def remux_callback(local_input: Path, local_output: Path) -> bool:
+            def remux_callback(local_input: Path, local_output: Path, progress=None, file_task=None) -> bool:
                 """Callback for remuxing a single video in queue mode"""
-                current_idx[0] += 1
-                print(f"[{current_idx[0]}/{total}] Remuxing: {local_input.name}")
-                success = encoder.remux_to_mp4(local_input, local_output)
-                if success:
-                    print(f"✓ [{current_idx[0]}/{total}] Completed: {local_input.name}")
-                return success
+                result = encoder.remux_to_mp4(local_input, local_output)
+                return result
 
             try:
                 start_shutdown_listener()
                 queue_manager.start(remux_callback)
             except KeyboardInterrupt:
-                print("\n\nInterrupted by user. Queue state saved for resume.")
+                console.print("\n\nInterrupted by user. Queue state saved for resume.")
                 sys.exit(0)
             finally:
                 stop_shutdown_listener()
         else:
             # Standard mode
-            for video_path in tqdm(videos_to_remux, desc="Remuxing MKV files", unit="video"):
-                output_path = video_path.with_suffix('.mp4')
-                
-                # Prevent overwriting itself if name is same after suffix change
-                if output_path == video_path:
-                    # This case should not happen with .mkv -> .mp4, but as a safeguard
-                    tqdm.write(f"{Colors.yellow('Skipping:')} {video_path.name} (output path is the same)")
-                    continue
+            remux_results = {}
+            with create_batch_progress() as progress:
+                overall = progress.add_task("Remuxing MKV files", total=len(videos_to_remux))
+                current = progress.add_task("", total=None)
+                for video_path in videos_to_remux:
+                    progress.update(current, description=video_path.name)
+                    output_path = video_path.with_suffix('.mp4')
 
-                tqdm.write(f"Remuxing: {video_path.name} → {output_path.name}")
-                success = encoder.remux_to_mp4(video_path, output_path)
+                    if output_path == video_path:
+                        remux_results[video_path] = 'skipped'
+                        progress.advance(overall)
+                        continue
 
-                if success:
-                    if args.replace_original:
-                        try:
-                            video_path.unlink()
-                            tqdm.write(f"✓ Replaced: {video_path.name} with {output_path.name}")
-                        except Exception as e:
-                            tqdm.write(f"{Colors.red('✗')} Failed to delete original file {video_path.name}: {e}")
+                    result = encoder.remux_to_mp4(video_path, output_path)
+
+                    if result:
+                        if args.replace_original:
+                            try:
+                                video_path.unlink()
+                                remux_results[video_path] = 'replaced'
+                            except Exception as e:
+                                remux_results[video_path] = f'delete_failed: {e}'
+                        else:
+                            remux_results[video_path] = 'created'
                     else:
-                        tqdm.write(f"✓ Created: {output_path.name}")
-                else:
-                    tqdm.write(f"{Colors.red('✗')} Failed to remux: {video_path.name}")
+                        remux_results[video_path] = 'failed'
 
-        print("\nForce remux complete.")
+                    progress.advance(overall)
+
+            # Print summary
+            succeeded = sum(1 for v in remux_results.values() if v in ('replaced', 'created'))
+            failed = sum(1 for v in remux_results.values() if v == 'failed')
+            console.print(f"Remuxed: [success]{succeeded} successful[/success], [error]{failed} failed[/error]")
+
+        console.print("\nForce remux complete.")
         sys.exit(0)
 
     # Check encoding specifications
     if args.check_specs:
-        print("="*80)
-        print("ENCODING SPECIFICATION CHECK")
-        print("="*80)
-        print()
+        section_header("ENCODING SPECIFICATION CHECK")
 
         compliant_videos = []
         non_compliant_videos = []
         failed_analyses = []
 
-        for video_path in tqdm(video_files, desc="Analyzing videos", unit="video"):
-            video_info = analyzer.get_video_info(video_path)
+        with create_batch_progress() as progress:
+            overall = progress.add_task("Analyzing videos", total=len(video_files))
+            current = progress.add_task("", total=None)
+            for video_path in video_files:
+                progress.update(current, description=video_path.name)
+                video_info = analyzer.get_video_info(video_path)
 
-            if not video_info or not video_info.is_valid:
-                tqdm.write(Colors.yellow(f"✗ {video_path.name}: Unable to analyze"))
-                failed_analyses.append(video_path)
-                continue
+                if not video_info or not video_info.is_valid:
+                    failed_analyses.append(video_path)
+                    progress.advance(overall)
+                    continue
 
-            is_compliant = analyzer.meets_modern_specs(video_info)
+                is_compliant = analyzer.meets_modern_specs(video_info)
 
-            if is_compliant:
-                compliant_videos.append(video_path)
-                tqdm.write(Colors.green(f"✓ {video_path.name}: Meets specs ({video_info.codec.upper()}, {video_info.width}x{video_info.height})"))
-            else:
-                non_compliant_videos.append((video_path, video_info))
-                tqdm.write(Colors.red(f"✗ {video_path.name}"))
+                if is_compliant:
+                    compliant_videos.append(video_path)
+                else:
+                    non_compliant_videos.append((video_path, video_info))
 
-                # Show specific reasons for non-compliance
+                    # Early exit: if re-encoding with max-files, stop once we have enough non-compliant videos
+                    if args.re_encode and args.max_files and len(non_compliant_videos) >= args.max_files * 2:
+                        break
+
+                progress.advance(overall)
+
+        # Print results after progress bar is gone
+        console.print()
+        console.print(f"Summary: [success]{len(compliant_videos)} compliant[/success], [error]{len(non_compliant_videos)} non-compliant[/error], [warning]{len(failed_analyses)} failed analysis[/warning]")
+
+        if non_compliant_videos:
+            console.print()
+            console.print("[error]Non-compliant videos:[/error]")
+            for video_path, video_info in non_compliant_videos:
                 codec_lower = video_info.codec.lower()
-                codec_compliant = codec_lower in analyzer.MODERN_CODECS
-                resolution_compliant = True
+                codec_ok = codec_lower in analyzer.MODERN_CODECS
+                codec_str = f"[success]{video_info.codec.upper()}[/success]" if codec_ok else f"[error]{video_info.codec.upper()}[/error]"
+                console.print(f"  [error]\u2717[/error] {video_path.name}  {codec_str}  {video_info.width}x{video_info.height}  {video_info.container}")
 
-                if analyzer.max_resolution is not None:
-                    max_width, max_height = analyzer.max_resolution
-                    resolution_compliant = video_info.width <= max_width and video_info.height <= max_height
-
-                if not codec_compliant:
-                    tqdm.write(f"    Codec: {Colors.red(video_info.codec.upper())} (should be {Colors.green('H.265/HEVC')}, {Colors.green('AV1')}, or {Colors.green('VP9')})")
-                else:
-                    tqdm.write(f"    Codec: {Colors.green(video_info.codec.upper())}")
-
-                if not resolution_compliant:
-                    tqdm.write(f"    Resolution: {Colors.red(f'{video_info.width}x{video_info.height}')} (exceeds max {max_width}x{max_height})")
-                else:
-                    tqdm.write(f"    Resolution: {video_info.width}x{video_info.height}")
-
-                tqdm.write(f"    Container: {video_info.container}")
-
-                # Early exit: if re-encoding with max-files, stop once we have enough non-compliant videos
-                # We use a 2x buffer since some might have existing outputs
-                if args.re_encode and args.max_files and len(non_compliant_videos) >= args.max_files * 2:
-                    print()
-                    print(f"Found {len(non_compliant_videos)} non-compliant videos (enough for --max-files {args.max_files}), stopping analysis")
-                    break
-
-        print()
-        print(f"Summary: {Colors.green(f'{len(compliant_videos)} compliant')}, {Colors.red(f'{len(non_compliant_videos)} non-compliant')}, {Colors.yellow(f'{len(failed_analyses)} failed analysis')}")
-
-        # Show failed analyses with full paths
         if failed_analyses:
-            print()
-            print(Colors.yellow("Videos that couldn't be analyzed:"))
+            console.print()
+            console.print("[warning]Videos that couldn't be analyzed:[/warning]")
             for video_path in failed_analyses:
-                print(f"  {video_path}")
+                console.print(f"  {video_path}")
 
-        print()
+        console.print()
 
         # Re-encode if requested
         if args.re_encode and non_compliant_videos:
-            print("="*80)
-            print("RE-ENCODING NON-COMPLIANT VIDEOS")
-            print("(Using smart quality matching to preserve visual quality)")
+            subtitle_parts = ["Using smart quality matching to preserve visual quality"]
             if args.recover:
-                print("🛠️  RECOVERY MODE: Using error-tolerant FFmpeg flags to salvage broken files")
+                subtitle_parts.append("\U0001f6e0\ufe0f  RECOVERY MODE: Using error-tolerant FFmpeg flags to salvage broken files")
             if args.replace_original:
-                print("⚠️  REPLACE MODE: Original files will be deleted and replaced")
-            print()
-            print("💡 TIP: Press 'q' at any time to stop after the current video")
-            print("="*80)
-            print()
+                subtitle_parts.append("\u26a0\ufe0f  REPLACE MODE: Original files will be deleted and replaced")
+            subtitle_parts.append("\U0001f4a1 TIP: Press 'q' at any time to stop after the current video")
+            section_header("RE-ENCODING NON-COMPLIANT VIDEOS", "\n".join(subtitle_parts))
 
             # Start shutdown listener for graceful exit
             start_shutdown_listener()
 
             # Check for existing valid re-encodes and filter them out
-            print("Checking for existing re-encoded outputs...")
+            console.print("Checking for existing re-encoded outputs...")
             videos_needing_encode = []
             videos_already_encoded = []
 
-            for video_path, video_info in tqdm(non_compliant_videos, desc="Checking for existing outputs", unit="video"):
-                existing_output = encoder.find_existing_output(video_path, target_codec=args.target_codec)
+            with create_batch_progress() as progress:
+                overall = progress.add_task("Checking for existing outputs", total=len(non_compliant_videos))
+                current = progress.add_task("", total=None)
+                for video_path, video_info in non_compliant_videos:
+                    progress.update(current, description=video_path.name)
+                    existing_output = encoder.find_existing_output(video_path, target_codec=args.target_codec)
 
-                if existing_output:
-                    videos_already_encoded.append((video_path, existing_output))
-                    tqdm.write(Colors.green(f"✓ {video_path.name}: Already has valid output ({existing_output.name})"))
-                else:
-                    videos_needing_encode.append((video_path, video_info))
+                    if existing_output:
+                        videos_already_encoded.append((video_path, existing_output))
+                    else:
+                        videos_needing_encode.append((video_path, video_info))
 
-                    # Apply max-files limit smartly: stop once we have enough files that need encoding
-                    if args.max_files and len(videos_needing_encode) >= args.max_files:
-                        print()
-                        print(f"Reached limit of {args.max_files} files needing encoding (checked {len(videos_already_encoded) + len(videos_needing_encode)} total)")
-                        break
+                        if args.max_files and len(videos_needing_encode) >= args.max_files:
+                            break
 
-            print()
+                    progress.advance(overall)
+
+            console.print()
             if videos_already_encoded:
-                print(f"Found {len(videos_already_encoded)} video(s) with existing valid re-encodes (skipping)")
-                print(f"Need to encode: {len(videos_needing_encode)} video(s)")
-                print()
+                console.print(f"Found {len(videos_already_encoded)} video(s) with existing valid re-encodes (skipping)")
+            console.print(f"Need to encode: {len(videos_needing_encode)} video(s)")
+            console.print()
 
             # Note: File type filtering now happens at the find_videos stage
             if not videos_needing_encode:
-                print("No videos need encoding.")
-                print()
+                console.print("No videos need encoding.")
+                console.print()
                 # Stop shutdown listener since we're not encoding anything
                 stop_shutdown_listener()
             else:
@@ -857,20 +803,14 @@ def main():
 
                 # Use queue mode if enabled
                 if args.queue_mode:
-                    print()
-                    print("="*80)
-                    print("QUEUE MODE ENABLED")
-                    print("="*80)
-                    print(f"Temp directory: {args.temp_dir or 'system temp'}")
-                    print(f"Buffer size: {args.buffer_size} files")
-                    print(f"Max temp storage: {args.max_temp_size} GB")
-                    print()
-                    print("Pipeline stages:")
-                    print("  1. DOWNLOAD: Network → Local temp storage")
-                    print("  2. ENCODE: Local encoding (fast!)")
-                    print("  3. UPLOAD: Local → Network")
-                    print("="*80)
-                    print()
+                    section_header("QUEUE MODE ENABLED",
+                        f"Temp directory: {args.temp_dir or 'system temp'}\n"
+                        f"Buffer size: {args.buffer_size} files\n"
+                        f"Max temp storage: {args.max_temp_size} GB\n\n"
+                        "Pipeline stages:\n"
+                        "  1. DOWNLOAD: Network \u2192 Local temp storage\n"
+                        "  2. ENCODE: Local encoding (fast!)\n"
+                        "  3. UPLOAD: Local \u2192 Network")
 
                     # Initialize queue manager
                     queue_manager = NetworkQueueManager(
@@ -883,20 +823,17 @@ def main():
 
                     # Try to resume from previous state
                     if queue_manager.load_state():
-                        print("Resumed from previous session")
-                        print()
+                        console.print("Resumed from previous session")
+                        console.print()
 
                     # Add files to queue
                     queue_manager.add_files(videos_to_encode)
 
                     # Create encoding callback
-                    current_idx = [0]  # Use list to allow modification in nested function
                     total = len(videos_to_encode)
 
-                    def encode_callback(local_input: Path, local_output: Path) -> bool:
+                    def encode_callback(local_input: Path, local_output: Path, progress=None, file_task=None) -> bool:
                         """Callback for encoding a single video in queue mode"""
-                        current_idx[0] += 1
-
                         # Find the original network path for this file
                         # (local_input is a temp file, need to find which video it corresponds to)
                         video_info = None
@@ -910,58 +847,48 @@ def main():
                                     video_info = info
                                     break
 
-                        # Encode the video
-                        success = encoder.re_encode_video(
+                        # Encode the video, passing progress handle for in-place updates
+                        result = encoder.re_encode_video(
                             local_input,
                             local_output,
                             target_codec=args.target_codec,
                             video_info=video_info,
-                            current_index=current_idx[0],
-                            total_count=total,
                             keep_original=True,  # Queue manager handles cleanup
-                            replace_original=False  # Queue manager handles replacement
+                            replace_original=False,  # Queue manager handles replacement
+                            progress=progress,
+                            file_task=file_task,
                         )
 
-                        return success
+                        return result
 
                     try:
                         # Start the queue (blocks until complete, including final uploads)
-                        print("Starting queue pipeline...")
-                        print()
                         queue_manager.start(encode_callback)
 
                         # If shutdown was requested, exit gracefully
                         if shutdown_requested():
-                            print("Queue processing stopped by user.")
+                            console.print("Queue processing stopped by user.")
                             # Cleanup is handled in the finally block
                             sys.exit(0)
 
                         # Show final progress
                         progress = queue_manager.get_progress()
-                        print()
-                        print("="*80)
-                        print("QUEUE MODE COMPLETE")
-                        print("="*80)
-                        print(f"Total: {progress['total']}")
-                        print(f"Completed: {Colors.green(str(progress['complete']))}")
-                        print(f"Failed: {Colors.red(str(progress['failed']))}")
-                        print("="*80)
-                        print()
+                        section_header("QUEUE MODE COMPLETE")
+                        console.print(f"Total: {progress['total']}")
+                        console.print(f"Completed: [success]{progress['complete']}[/success]")
+                        console.print(f"Failed: [error]{progress['failed']}[/error]")
 
                         # Cleanup temp directory
                         queue_manager.cleanup()
 
                     except KeyboardInterrupt:
-                        print()
-                        print("="*80)
-                        print("INTERRUPTED - Saving state...")
-                        print("="*80)
+                        section_header("INTERRUPTED", "Saving state...")
                         queue_manager.stop()
                         stop_shutdown_listener()
                         analyzer.save_cache()
-                        print()
-                        print("Progress saved. Run the same command again to resume.")
-                        print()
+                        console.print()
+                        console.print("Progress saved. Run the same command again to resume.")
+                        console.print()
                         sys.exit(0)
                     finally:
                         # Stop shutdown listener when queue mode completes
@@ -978,15 +905,12 @@ def main():
                             replace_original=args.replace_original
                         )
                     except KeyboardInterrupt:
-                        print()
-                        print("="*80)
-                        print("INTERRUPTED - Stopping after current video")
-                        print("="*80)
+                        section_header("INTERRUPTED", "Stopping after current video")
                         stop_shutdown_listener()
                         analyzer.save_cache()
-                        print()
-                        print("You can safely resume by running the same command again.")
-                        print()
+                        console.print()
+                        console.print("You can safely resume by running the same command again.")
+                        console.print()
                         sys.exit(0)
                     finally:
                         # Stop shutdown listener when batch encoding completes
@@ -994,68 +918,67 @@ def main():
 
         # Fix QuickLook compatibility if requested
         if args.fix_quicklook and compliant_videos:
-            print("="*80)
-            print("QUICKLOOK COMPATIBILITY CHECK")
-            print("="*80)
-            print()
+            section_header("QUICKLOOK COMPATIBILITY CHECK")
 
             videos_to_remux = []
             videos_to_reencode = []
 
-            for video_path in tqdm(compliant_videos, desc="Checking QuickLook compatibility", unit="video"):
-                compat = analyzer.check_quicklook_compatibility(video_path)
+            with create_batch_progress() as progress:
+                overall = progress.add_task("Checking QuickLook compatibility", total=len(compliant_videos))
+                current = progress.add_task("", total=None)
+                for video_path in compliant_videos:
+                    progress.update(current, description=video_path.name)
+                    compat = analyzer.check_quicklook_compatibility(video_path)
 
-                if compat['compatible']:
-                    tqdm.write(Colors.green(f"✓ {video_path.name}: QuickLook compatible"))
-                elif compat['needs_remux']:
-                    tqdm.write(Colors.yellow(f"⚠ {video_path.name}: Needs remux (fast)"))
-                    for issue in compat['issues']:
-                        tqdm.write(f"    - {issue}")
-                    videos_to_remux.append(video_path)
-                elif compat['needs_reencode']:
-                    tqdm.write(Colors.red(f"✗ {video_path.name}: Needs re-encode"))
-                    for issue in compat['issues']:
-                        tqdm.write(f"    - {issue}")
-                    videos_to_reencode.append(video_path)
+                    if compat['needs_remux']:
+                        videos_to_remux.append(video_path)
+                    elif compat['needs_reencode']:
+                        videos_to_reencode.append(video_path)
 
-            print()
-            print(f"Summary: {Colors.green(f'{len(compliant_videos) - len(videos_to_remux) - len(videos_to_reencode)} compatible')}, "
-                  f"{Colors.yellow(f'{len(videos_to_remux)} need remux')}, "
-                  f"{Colors.red(f'{len(videos_to_reencode)} need re-encode')}")
-            print()
+                    progress.advance(overall)
+
+            compatible_count = len(compliant_videos) - len(videos_to_remux) - len(videos_to_reencode)
+            console.print()
+            console.print(f"Summary: [success]{compatible_count} compatible[/success], "
+                  f"[warning]{len(videos_to_remux)} need remux[/warning], "
+                  f"[error]{len(videos_to_reencode)} need re-encode[/error]")
+            console.print()
 
             # Check for existing QuickLook outputs to avoid re-processing
             if videos_to_remux or videos_to_reencode:
-                print("Checking for existing QuickLook outputs...")
+                console.print("Checking for existing QuickLook outputs...")
                 videos_remux_needed = []
                 videos_reencode_needed = []
                 videos_already_fixed = []
 
                 all_videos_to_check = videos_to_remux + videos_to_reencode
 
-                for video_path in tqdm(all_videos_to_check, desc="Checking for existing outputs", unit="video"):
-                    # Look for existing _quicklook or _reencoded files
-                    existing_output = encoder.find_existing_output(
-                        video_path,
-                        target_codec=args.target_codec,
-                        check_suffixes=['_quicklook', '_reencoded']
-                    )
+                with create_batch_progress() as progress:
+                    overall = progress.add_task("Checking for existing outputs", total=len(all_videos_to_check))
+                    current = progress.add_task("", total=None)
+                    for video_path in all_videos_to_check:
+                        progress.update(current, description=video_path.name)
+                        existing_output = encoder.find_existing_output(
+                            video_path,
+                            target_codec=args.target_codec,
+                            check_suffixes=['_quicklook', '_reencoded']
+                        )
 
-                    if existing_output:
-                        videos_already_fixed.append((video_path, existing_output))
-                        tqdm.write(Colors.green(f"✓ {video_path.name}: Already has valid output ({existing_output.name})"))
-                    else:
-                        # Add to appropriate list based on original categorization
-                        if video_path in videos_to_remux:
-                            videos_remux_needed.append(video_path)
+                        if existing_output:
+                            videos_already_fixed.append((video_path, existing_output))
                         else:
-                            videos_reencode_needed.append(video_path)
+                            if video_path in videos_to_remux:
+                                videos_remux_needed.append(video_path)
+                            else:
+                                videos_reencode_needed.append(video_path)
 
-                print()
+                        progress.advance(overall)
+
+                console.print()
                 if videos_already_fixed:
-                    print(f"Found {len(videos_already_fixed)} video(s) with existing valid QuickLook outputs (skipping)")
-                    print(f"Need to fix: {len(videos_remux_needed) + len(videos_reencode_needed)} video(s)")
-                    print()
+                    console.print(f"Found {len(videos_already_fixed)} video(s) with existing valid QuickLook outputs (skipping)")
+                console.print(f"Need to fix: {len(videos_remux_needed) + len(videos_reencode_needed)} video(s)")
+                console.print()
 
                 # Update the lists with only videos that need processing
                 videos_to_remux = videos_remux_needed
@@ -1066,20 +989,14 @@ def main():
 
             # Process with queue mode if enabled
             if all_videos_to_fix and args.queue_mode:
-                print()
-                print("="*80)
-                print("QUEUE MODE ENABLED FOR QUICKLOOK FIX")
-                print("="*80)
-                print(f"Temp directory: {args.temp_dir or 'system temp'}")
-                print(f"Buffer size: {args.buffer_size} files")
-                print(f"Max temp storage: {args.max_temp_size} GB")
-                print()
-                print("Pipeline stages:")
-                print("  1. DOWNLOAD: Network → Local temp storage")
-                print("  2. FIX: Remux or re-encode (local, fast!)")
-                print("  3. UPLOAD: Local → Network")
-                print("="*80)
-                print()
+                section_header("QUEUE MODE ENABLED FOR QUICKLOOK FIX",
+                    f"Temp directory: {args.temp_dir or 'system temp'}\n"
+                    f"Buffer size: {args.buffer_size} files\n"
+                    f"Max temp storage: {args.max_temp_size} GB\n\n"
+                    "Pipeline stages:\n"
+                    "  1. DOWNLOAD: Network \u2192 Local temp storage\n"
+                    "  2. FIX: Remux or re-encode (local, fast!)\n"
+                    "  3. UPLOAD: Local \u2192 Network")
 
                 # Initialize queue manager
                 queue_manager = NetworkQueueManager(
@@ -1092,20 +1009,15 @@ def main():
 
                 # Try to resume from previous state
                 if queue_manager.load_state():
-                    print("Resumed from previous session")
-                    print()
+                    console.print("Resumed from previous session")
+                    console.print()
 
                 # Add files to queue
                 queue_manager.add_files(all_videos_to_fix)
 
                 # Create processing callback
-                current_idx = [0]
-                total = len(all_videos_to_fix)
-
-                def quicklook_fix_callback(local_input: Path, local_output: Path) -> bool:
+                def quicklook_fix_callback(local_input: Path, local_output: Path, progress=None, file_task=None) -> bool:
                     """Callback for fixing QuickLook compatibility in queue mode"""
-                    current_idx[0] += 1
-
                     # Find the original network path to determine if remux or re-encode
                     needs_remux = False
                     needs_reencode = False
@@ -1127,48 +1039,38 @@ def main():
 
                     # Process based on what's needed
                     if needs_remux:
-                        print(f"[{current_idx[0]}/{total}] Remuxing: {local_input.name}")
-                        success = encoder.remux_to_mp4(local_input, local_output)
-                        if success:
-                            print(f"✓ [{current_idx[0]}/{total}] Completed: {local_input.name}")
-                        return success
+                        result = encoder.remux_to_mp4(local_input, local_output)
+                        return result
                     elif needs_reencode:
-                        success = encoder.re_encode_video(
+                        result = encoder.re_encode_video(
                             local_input,
                             local_output,
                             target_codec=args.target_codec,
                             video_info=video_info,
-                            current_index=current_idx[0],
-                            total_count=total,
                             keep_original=True,
-                            replace_original=False
+                            replace_original=False,
+                            progress=progress,
+                            file_task=file_task,
                         )
-                        return success
+                        return result
                     else:
                         return False
 
                 try:
                     # Start the queue
-                    print("Starting queue pipeline...")
-                    print()
                     start_shutdown_listener()
                     queue_manager.start(quicklook_fix_callback)
 
                     # Show final progress
                     progress = queue_manager.get_progress()
-                    print()
-                    print("="*80)
-                    print("QUEUE MODE COMPLETE")
-                    print("="*80)
-                    print(f"Completed: {Colors.green(str(progress['complete']))}")
+                    section_header("QUEUE MODE COMPLETE")
+                    console.print(f"Completed: [success]{progress['complete']}[/success]")
                     if progress['failed'] > 0:
-                        print(f"Failed: {Colors.red(str(progress['failed']))}")
-                    print("="*80)
-                    print()
+                        console.print(f"Failed: [error]{progress['failed']}[/error]")
 
                 except KeyboardInterrupt:
-                    print("\n\nInterrupted by user. Queue state saved for resume.")
-                    print("Run the same command again to resume from where you left off.")
+                    console.print("\n\nInterrupted by user. Queue state saved for resume.")
+                    console.print("Run the same command again to resume from where you left off.")
                     analyzer.save_cache()
                     sys.exit(0)
                 finally:
@@ -1178,43 +1080,37 @@ def main():
             elif all_videos_to_fix:
                 # Remux videos (fast - just container change)
                 if videos_to_remux:
-                    print("="*80)
-                    print("REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)")
-                    print("="*80)
-                    print()
+                    section_header("REMUXING FOR QUICKLOOK COMPATIBILITY (FAST)")
 
                     for video_path in videos_to_remux:
                         output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
 
-                        print(f"Remuxing: {video_path.name}")
-                        success = encoder.remux_to_mp4(video_path, output_path)
+                        console.print(f"Remuxing: {video_path.name}")
+                        result = encoder.remux_to_mp4(video_path, output_path)
 
-                        if success:
+                        if result:
                             if args.replace_original:
                                 # Delete original and rename output
                                 video_path.unlink()
                                 output_path.rename(video_path.with_suffix('.mp4'))
-                                print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                                console.print(f"[success]\u2713 Replaced: {video_path.name} \u2192 {video_path.stem}.mp4[/success]")
                             else:
-                                print(f"✓ Created: {output_path.name}")
+                                console.print(f"[success]\u2713 Created: {output_path.name}[/success]")
                         else:
-                            print(f"✗ Failed: {video_path.name}")
+                            console.print(f"[error]\u2717 Failed: {video_path.name}[/error]")
 
-                    print()
+                    console.print()
 
                 # Re-encode videos (slower - needs full re-encode)
                 if videos_to_reencode:
-                    print("="*80)
-                    print("RE-ENCODING FOR QUICKLOOK COMPATIBILITY")
-                    print("="*80)
-                    print()
+                    section_header("RE-ENCODING FOR QUICKLOOK COMPATIBILITY")
 
                     for video_path in videos_to_reencode:
                         video_info = analyzer.get_video_info(video_path)
                         output_path = video_path.parent / f"{video_path.stem}_quicklook.mp4"
 
-                        print(f"Re-encoding: {video_path.name}")
-                        success = encoder.re_encode_video(
+                        console.print(f"Re-encoding: {video_path.name}")
+                        result = encoder.re_encode_video(
                             video_path,
                             output_path,
                             target_codec=args.target_codec,
@@ -1222,41 +1118,40 @@ def main():
                             keep_original=not args.replace_original
                         )
 
-                        if success:
+                        if result:
                             if args.replace_original:
                                 # Delete original and rename output
                                 if video_path.exists() and video_path != output_path:
                                     video_path.unlink()
                                 if output_path != video_path.with_suffix('.mp4'):
                                     output_path.rename(video_path.with_suffix('.mp4'))
-                                print(f"✓ Replaced: {video_path.name} → {video_path.stem}.mp4")
+                                console.print(f"[success]\u2713 Replaced: {video_path.name} \u2192 {video_path.stem}.mp4[/success]")
                             else:
-                                print(f"✓ Created: {output_path.name}")
+                                console.print(f"[success]\u2713 Created: {output_path.name}[/success]")
                         else:
-                            print(f"✗ Failed: {video_path.name}")
+                            console.print(f"[error]\u2717 Failed: {video_path.name}[/error]")
 
-                    print()
+                    console.print()
 
     # Find duplicates
     if args.find_duplicates or args.filename_duplicates:
         # Stop shutdown listener to restore normal terminal mode for input prompts
         stop_shutdown_listener()
 
-        print("="*80)
-        print("DUPLICATE VIDEO DETECTION")
+        subtitle_parts = []
         if args.filename_duplicates:
-            print("(Method: Filename matching - fast, no perceptual hashing)")
+            subtitle_parts.append("Method: Filename matching - fast, no perceptual hashing")
         else:
-            print("(Method: Perceptual hashing)")
+            subtitle_parts.append("Method: Perceptual hashing")
         if args.duplicate_action != 'report':
-            print(f"(Action: {args.duplicate_action})")
-        print("="*80)
+            subtitle_parts.append(f"Action: {args.duplicate_action}")
+        section_header("DUPLICATE VIDEO DETECTION", "\n".join(subtitle_parts))
 
         # Use filename-based detection if requested, otherwise use perceptual hashing
         failed_videos = []
         if args.filename_duplicates:
             duplicate_groups = duplicate_detector.find_duplicates_by_filename(
-                video_files, 
+                video_files,
                 analyzer=analyzer,
                 check_duration=not args.ignore_duration
             )
@@ -1264,15 +1159,15 @@ def main():
             duplicate_groups, failed_videos = duplicate_detector.find_duplicates(video_files)
 
         if failed_videos:
-            print()
-            print(f"{Colors.yellow('WARNING:')} The following {len(failed_videos)} files failed the integrity check (could not be read/hashed):")
+            console.print()
+            console.print(f"[warning]WARNING: The following {len(failed_videos)} files failed the integrity check (could not be read/hashed):[/warning]")
             for video in failed_videos:
-                print(f"  - {Colors.red(video.name)}")
+                console.print(f"  - [error]{video.name}[/error]")
 
         if duplicate_groups:
-            print()
-            print(f"Found {len(duplicate_groups)} groups of duplicate videos:")
-            print()
+            console.print()
+            console.print(f"Found {len(duplicate_groups)} groups of duplicate videos:")
+            console.print()
 
             all_to_delete = []
             all_to_keep = []
@@ -1282,15 +1177,15 @@ def main():
             if args.duplicate_action == 'report':
                 # Just report duplicates, no action
                 for group_name, videos in duplicate_groups.items():
-                    print(f"{group_name} ({len(videos)} videos):")
+                    console.print(f"{group_name} ({len(videos)} videos):")
                     for video in videos:
                         file_size_mb = video.stat().st_size / (1024 * 1024)
-                        print(f"  - {video.name} ({file_size_mb:.2f} MB)")
-                    print()
+                        console.print(f"  - {video.name} ({file_size_mb:.2f} MB)")
+                    console.print()
             else:
                 # Handle each group with auto-best or interactive
                 for group_name, videos in duplicate_groups.items():
-                    print(f"{group_name}:")
+                    console.print(f"{group_name}:")
                     to_delete, to_keep = handle_duplicate_group(
                         group_name,
                         videos,
@@ -1304,14 +1199,11 @@ def main():
                         # Map each deleted file to its kept file
                         for deleted_file in to_delete:
                             delete_to_keep_map[deleted_file] = to_keep
-                    print()
+                    console.print()
 
                 # Perform deletions if any
                 if all_to_delete:
-                    print()
-                    print("="*80)
-                    print(f"DELETING {len(all_to_delete)} DUPLICATE FILES")
-                    print("="*80)
+                    section_header(f"DELETING {len(all_to_delete)} DUPLICATE FILES")
 
                     if args.duplicate_action == 'auto-best':
                         # Auto mode - delete immediately
@@ -1339,16 +1231,16 @@ def main():
                                     else:
                                         incremental_space_saved += deleted_size
 
-                                    print(f"  {Colors.green('✓')} Deleted: {video.name}")
+                                    console.print(f"  [success]\u2713[/success] Deleted: {video.name}")
                                 except Exception as e:
-                                    print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
+                                    console.print(f"  [error]\u2717[/error] Failed to delete {video.name}: {e}")
 
-                            print()
-                            print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                            print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
-                            print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
+                            console.print()
+                            console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
+                            console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                            console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
                         else:
-                            print(f"{Colors.yellow('→ Deletion cancelled')}")
+                            console.print(f"[warning]\u2192 Deletion cancelled[/warning]")
                     else:
                         # Interactive mode - already got confirmation per group, delete now
                         deleted_count = 0
@@ -1373,22 +1265,19 @@ def main():
                                 else:
                                     incremental_space_saved += deleted_size
 
-                                print(f"  {Colors.green('✓')} Deleted: {video.name}")
+                                console.print(f"  [success]\u2713[/success] Deleted: {video.name}")
                             except Exception as e:
-                                print(f"  {Colors.red('✗')} Failed to delete {video.name}: {e}")
+                                console.print(f"  [error]\u2717[/error] Failed to delete {video.name}: {e}")
 
-                        print()
-                        print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                        print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
-                        print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
-                    print()
+                        console.print()
+                        console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
+                        console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                        console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
+                    console.print()
 
                     # Clean up filenames of kept files (remove _reencoded and _quicklook suffixes)
                     if all_to_keep:
-                        print("="*80)
-                        print("CLEANING UP FILENAMES")
-                        print("="*80)
-                        print()
+                        section_header("CLEANING UP FILENAMES")
 
                         renamed_count = 0
                         for video in all_to_keep:
@@ -1405,58 +1294,71 @@ def main():
 
                                 # Check if target path already exists
                                 if new_path.exists():
-                                    print(f"  {Colors.yellow('⚠')} Skipping {video.name}: {new_path.name} already exists")
+                                    console.print(f"  [warning]\u26a0[/warning] Skipping {video.name}: {new_path.name} already exists")
                                 else:
                                     try:
                                         video.rename(new_path)
                                         renamed_count += 1
-                                        print(f"  {Colors.green('✓')} Renamed: {video.name} → {new_path.name}")
+                                        console.print(f"  [success]\u2713[/success] Renamed: {video.name} \u2192 {new_path.name}")
                                     except Exception as e:
-                                        print(f"  {Colors.red('✗')} Failed to rename {video.name}: {e}")
+                                        console.print(f"  [error]\u2717[/error] Failed to rename {video.name}: {e}")
 
                         if renamed_count > 0:
-                            print()
-                            print(f"Renamed {renamed_count} file(s)")
+                            console.print()
+                            console.print(f"Renamed {renamed_count} file(s)")
                         else:
-                            print(f"No files needed renaming")
-                        print()
+                            console.print(f"No files needed renaming")
+                        console.print()
                 else:
-                    print()
-                    print(f"{Colors.yellow('No duplicates marked for deletion')}")
+                    console.print()
+                    console.print(f"[warning]No duplicates marked for deletion[/warning]")
 
-            print(f"Total duplicates: {sum(len(v) for v in duplicate_groups.values())} videos in {len(duplicate_groups)} groups")
+            console.print(f"Total duplicates: {sum(len(v) for v in duplicate_groups.values())} videos in {len(duplicate_groups)} groups")
         else:
-            print()
-            print("No duplicate videos found.")
+            console.print()
+            console.print("No duplicate videos found.")
 
-        print()
+        console.print()
 
     # Check for issues
     if args.check_issues:
-        print("="*80)
-        print("ENCODING ISSUE DETECTION")
-        if args.deep_scan:
-            print("(Deep scan mode: decoding entire videos)")
-        print("="*80)
-        print()
+        subtitle = "Deep scan mode: decoding entire videos" if args.deep_scan else None
+        section_header("ENCODING ISSUE DETECTION", subtitle)
 
         videos_with_issues = []
 
         scan_desc = "Deep scanning videos" if args.deep_scan else "Checking for issues"
-        for video_path in tqdm(video_files, desc=scan_desc, unit="video"):
-            issues = issue_detector.scan_video(video_path, deep_scan=args.deep_scan)
+        with create_batch_progress() as progress:
+            overall = progress.add_task(scan_desc, total=len(video_files))
+            current = progress.add_task("", total=None)
+            for video_path in video_files:
+                progress.update(current, description=video_path.name)
+                issues = issue_detector.scan_video(video_path, deep_scan=args.deep_scan)
 
-            if issues:
-                videos_with_issues.append((video_path, issues))
-                tqdm.write(f"{video_path.name}:")
+                if issues:
+                    videos_with_issues.append((video_path, issues))
+
+                progress.advance(overall)
+
+        # Print all issues after progress bar is gone
+        if videos_with_issues:
+            console.print()
+            for video_path, issues in videos_with_issues:
+                console.print(f"{video_path.name}:")
                 for issue in issues:
                     severity_symbol = {
-                        'critical': '✗',
-                        'warning': '⚠',
-                        'info': 'ℹ'
-                    }.get(issue.severity, '•')
+                        'critical': '\u2717',
+                        'warning': '\u26a0',
+                        'info': '\u2139'
+                    }.get(issue.severity, '\u2022')
 
-                    tqdm.write(f"  {severity_symbol} [{issue.severity.upper()}] {issue.issue_type}: {issue.description}")
+                    severity_style = {
+                        'critical': 'error',
+                        'warning': 'warning',
+                        'info': 'info'
+                    }.get(issue.severity, '')
+
+                    console.print(f"  [{severity_style}]{severity_symbol} [{issue.severity.upper()}] {issue.issue_type}: {issue.description}[/{severity_style}]")
 
         if videos_with_issues:
             critical_count = sum(
@@ -1470,18 +1372,16 @@ def main():
                 if issue.severity == 'warning'
             )
 
-            print()
-            print(f"Summary: {len(videos_with_issues)} videos with issues")
-            print(f"  Critical: {critical_count}")
-            print(f"  Warnings: {warning_count}")
+            console.print()
+            console.print(f"Summary: {len(videos_with_issues)} videos with issues")
+            console.print(f"  Critical: {critical_count}")
+            console.print(f"  Warnings: {warning_count}")
         else:
-            print("\nNo issues detected.")
+            console.print("\nNo issues detected.")
 
-        print()
+        console.print()
 
-    print("="*80)
-    print("VideoSentinel scan complete!")
-    print("="*80)
+    section_header("VideoSentinel scan complete!")
 
     analyzer.save_cache()
 

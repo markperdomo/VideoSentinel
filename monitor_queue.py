@@ -15,31 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List
 
-
-class Colors:
-    """ANSI color codes"""
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    RESET = '\033[0m'
-
-    @staticmethod
-    def green(text):
-        return f"{Colors.GREEN}{text}{Colors.RESET}"
-
-    @staticmethod
-    def red(text):
-        return f"{Colors.RED}{text}{Colors.RESET}"
-
-    @staticmethod
-    def yellow(text):
-        return f"{Colors.YELLOW}{text}{Colors.RESET}"
-
-    @staticmethod
-    def cyan(text):
-        return f"{Colors.CYAN}{text}{Colors.RESET}"
+from rich.table import Table
+from rich.panel import Panel
+from ui import console, section_header
 
 
 def get_queue_state_path(temp_dir: Path = None) -> Path:
@@ -127,28 +105,26 @@ def print_queue_summary(state: Dict):
 
     total = len(files)
 
-    print("="*70)
-    print("QUEUE SUMMARY")
-    print("="*70)
-    print(f"Total files: {total}")
-    print()
+    section_header("QUEUE SUMMARY")
+    console.print(f"Total files: {total}")
+    console.print()
 
     if state_counts['pending'] > 0:
-        print(f"  Pending download:  {Colors.cyan(str(state_counts['pending']))}")
+        console.print(f"  Pending download:  [info]{state_counts['pending']}[/info]")
     if state_counts['downloading'] > 0:
-        print(f"  Downloading:       {Colors.cyan(str(state_counts['downloading']))}")
+        console.print(f"  Downloading:       [info]{state_counts['downloading']}[/info]")
     if state_counts['local'] > 0:
-        print(f"  Ready to encode:   {Colors.yellow(str(state_counts['local']))}")
+        console.print(f"  Ready to encode:   [warning]{state_counts['local']}[/warning]")
     if state_counts['encoding'] > 0:
-        print(f"  Encoding:          {Colors.yellow(str(state_counts['encoding']))}")
+        console.print(f"  Encoding:          [warning]{state_counts['encoding']}[/warning]")
     if state_counts['uploading'] > 0:
-        print(f"  Uploading:         {Colors.yellow(str(state_counts['uploading']))}")
+        console.print(f"  Uploading:         [warning]{state_counts['uploading']}[/warning]")
     if state_counts['complete'] > 0:
-        print(f"  Complete:          {Colors.green(str(state_counts['complete']))}")
+        console.print(f"  Complete:          [success]{state_counts['complete']}[/success]")
     if state_counts['failed'] > 0:
-        print(f"  Failed:            {Colors.red(str(state_counts['failed']))}")
+        console.print(f"  Failed:            [error]{state_counts['failed']}[/error]")
 
-    print()
+    console.print()
 
     # Progress bar
     if total > 0:
@@ -156,9 +132,9 @@ def print_queue_summary(state: Dict):
         failed_pct = (state_counts['failed'] / total) * 100
         in_progress_pct = 100 - complete_pct - failed_pct
 
-        print(f"Progress: {complete_pct:.1f}% complete, {failed_pct:.1f}% failed, {in_progress_pct:.1f}% in progress")
+        console.print(f"Progress: {complete_pct:.1f}% complete, {failed_pct:.1f}% failed, {in_progress_pct:.1f}% in progress")
 
-    print()
+    console.print()
 
 
 def print_failed_files(state: Dict):
@@ -169,47 +145,42 @@ def print_failed_files(state: Dict):
     if not failed_files:
         return
 
-    print("="*70)
-    print("FAILED FILES")
-    print("="*70)
-    print()
+    section_header("FAILED FILES")
 
     for idx, file_info in enumerate(failed_files, 1):
         source = Path(file_info['source_path']).name
         error = file_info.get('error', 'Unknown error')
 
-        print(f"{idx}. {Colors.red('✗')} {source}")
-        print(f"   Error: {error}")
-        print()
+        console.print(f"{idx}. [error]\u2717[/error] {source}")
+        console.print(f"   Error: {error}")
+        console.print()
 
 
 def print_temp_dir_info(temp_dir: Path):
     """Print information about temp directory"""
     info = get_temp_dir_info(temp_dir)
 
-    print("="*70)
-    print("TEMP DIRECTORY")
-    print("="*70)
-    print(f"Location: {temp_dir}")
-    print()
+    section_header("TEMP DIRECTORY")
+    console.print(f"Location: {temp_dir}")
+    console.print()
 
     if not info['exists']:
-        print(Colors.yellow("Directory does not exist (queue not started or already cleaned)"))
-        print()
+        console.print("[warning]Directory does not exist (queue not started or already cleaned)[/warning]")
+        console.print()
         return
 
-    print(f"Total size: {info['size_str']}")
-    print(f"File count: {info['file_count']}")
-    print()
+    console.print(f"Total size: {info['size_str']}")
+    console.print(f"File count: {info['file_count']}")
+    console.print()
 
     if info['file_count'] > 0:
-        print("Files:")
+        console.print("Files:")
         for file_info in info['files'][:10]:  # Show top 10 largest
-            print(f"  - {file_info['name']} ({file_info['size_str']})")
+            console.print(f"  - {file_info['name']} ({file_info['size_str']})")
 
         if info['file_count'] > 10:
-            print(f"  ... and {info['file_count'] - 10} more files")
-        print()
+            console.print(f"  ... and {info['file_count'] - 10} more files")
+        console.print()
 
 
 def print_detailed_status(state: Dict, show_all: bool = False):
@@ -221,48 +192,52 @@ def print_detailed_status(state: Dict, show_all: bool = False):
         files = [f for f in files if f.get('state') != 'complete']
 
     if not files:
-        print("="*70)
-        print("No files to show (all complete)")
-        print("="*70)
+        section_header("No files to show (all complete)")
         return
 
-    print("="*70)
-    print(f"DETAILED STATUS {'(ALL FILES)' if show_all else '(IN PROGRESS + FAILED)'}")
-    print("="*70)
-    print()
+    title = "ALL FILES" if show_all else "IN PROGRESS + FAILED"
+
+    table = Table(title=f"Detailed Status ({title})")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Status", width=14)
+    table.add_column("File")
+    table.add_column("Details", style="dim")
+
+    state_styles = {
+        'complete': 'green',
+        'failed': 'red',
+        'encoding': 'yellow',
+        'uploading': 'yellow',
+        'pending': 'cyan',
+        'downloading': 'cyan',
+        'local': 'cyan',
+    }
 
     state_symbols = {
-        'pending': '⏳',
-        'downloading': '⬇️',
-        'local': '💾',
-        'encoding': '⚙️',
-        'uploading': '⬆️',
-        'complete': '✅',
-        'failed': '❌'
+        'pending': '\u23f3',
+        'downloading': '\u2b07',
+        'local': '\U0001f4be',
+        'encoding': '\u2699',
+        'uploading': '\u2b06',
+        'complete': '\u2705',
+        'failed': '\u274c'
     }
 
     for idx, file_info in enumerate(files, 1):
         source = Path(file_info['source_path']).name
         file_state = file_info.get('state', 'unknown')
+        style = state_styles.get(file_state, '')
         symbol = state_symbols.get(file_state, '?')
+        details = file_info.get('error', '') if file_state == 'failed' else ''
 
-        # Color based on state
-        if file_state == 'complete':
-            status_str = Colors.green(file_state.upper())
-        elif file_state == 'failed':
-            status_str = Colors.red(file_state.upper())
-        elif file_state in ['encoding', 'uploading']:
-            status_str = Colors.yellow(file_state.upper())
-        else:
-            status_str = Colors.cyan(file_state.upper())
+        table.add_row(
+            str(idx),
+            f"[{style}]{symbol} {file_state.upper()}[/{style}]",
+            source,
+            details
+        )
 
-        print(f"{idx}. {symbol} {source}")
-        print(f"   Status: {status_str}")
-
-        if file_state == 'failed' and file_info.get('error'):
-            print(f"   Error: {Colors.red(file_info['error'])}")
-
-        print()
+    console.print(table)
 
 
 def main():
@@ -298,25 +273,23 @@ def main():
     state_file = get_queue_state_path(args.temp_dir)
     temp_dir = get_temp_dir_path(args.temp_dir)
 
-    print()
-    print("╔══════════════════════════════════════════════════════════════════╗")
-    print("║          VideoSentinel Queue Monitor                             ║")
-    print("╚══════════════════════════════════════════════════════════════════╝")
-    print()
-    print(f"State file: {state_file}")
-    print()
+    console.print()
+    console.print(Panel("VideoSentinel Queue Monitor", style="bold cyan"))
+    console.print()
+    console.print(f"State file: {state_file}")
+    console.print()
 
     # Load state
     state = load_queue_state(state_file)
 
     if not state:
-        print(Colors.yellow("No queue state file found."))
-        print()
-        print("This could mean:")
-        print("  - Queue mode has not been started yet")
-        print("  - Queue was already cleared with --clear-queue")
-        print("  - Using a different temp directory than expected")
-        print()
+        console.print("[warning]No queue state file found.[/warning]")
+        console.print()
+        console.print("This could mean:")
+        console.print("  - Queue mode has not been started yet")
+        console.print("  - Queue was already cleared with --clear-queue")
+        console.print("  - Using a different temp directory than expected")
+        console.print()
         sys.exit(0)
 
     # Print information
@@ -328,8 +301,7 @@ def main():
         print_temp_dir_info(temp_dir)
         print_detailed_status(state, show_all=args.all)
 
-    print("="*70)
-    print()
+    console.print()
 
 
 if __name__ == '__main__':
