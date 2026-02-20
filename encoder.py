@@ -319,15 +319,13 @@ class VideoEncoder:
             # Add input file
             cmd.extend(['-i', str(input_path)])
 
+            # Compute file size once for memory-safe decisions
+            file_size_gb = input_path.stat().st_size / (1024**3)
+            is_large_file = file_size_gb > 4  # >4GB triggers memory-safe settings
+
             # Add OUTPUT recovery flags (AFTER -i)
             if self.recovery_mode:
-                # Dynamic memory settings based on file size to balance performance and memory
-                # Large files (>10GB): Use conservative settings to avoid OOM on remote servers
-                # Small files (<10GB): Use aggressive settings for maximum performance
-                file_size_gb = input_path.stat().st_size / (1024**3)
-                is_large_file = file_size_gb > 10
-
-                # Set muxing queue size
+                # Set muxing queue size (conservative for large files)
                 max_queue_size = '512' if is_large_file else '1024'
                 cmd.extend(['-max_muxing_queue_size', max_queue_size])
 
@@ -336,6 +334,12 @@ class VideoEncoder:
 
                 if self.verbose and is_large_file:
                     console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-efficient settings (queue:512, threads:4)", style="dim")
+
+            # Memory-safe muxing queue for large files in normal mode
+            if not self.recovery_mode and is_large_file:
+                cmd.extend(['-max_muxing_queue_size', '512'])
+                if self.verbose:
+                    console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-safe muxing queue", style="dim")
 
             # Continue with encoding parameters
             cmd.extend([
@@ -346,10 +350,8 @@ class VideoEncoder:
             ])
 
             # Dynamic thread limiting for large files in recovery mode
-            if self.recovery_mode:
-                file_size_gb = input_path.stat().st_size / (1024**3)
-                if file_size_gb > 10:
-                    cmd.extend(['-threads', '4'])
+            if self.recovery_mode and is_large_file:
+                cmd.extend(['-threads', '4'])
 
 
             # Add audio filter to handle problematic channel layouts
@@ -385,8 +387,17 @@ class VideoEncoder:
                 cmd.extend(['-pix_fmt', 'yuv420p'])
                 # Add movflags for better QuickLook compatibility
                 cmd.extend(['-movflags', 'faststart'])
-                # Add x265-params for better HEVC encoding
-                cmd.extend(['-x265-params', 'log-level=error'])
+                # Build x265 params
+                x265_params = ['log-level=error']
+                if is_large_file:
+                    # Memory-safe settings: limit thread pools and lookahead buffers
+                    # to prevent OOM on large high-res files
+                    x265_params.extend([
+                        'pools=4',
+                        'frame-threads=2',
+                        'lookahead-depth=10',
+                    ])
+                cmd.extend(['-x265-params', ':'.join(x265_params)])
             elif target_codec.lower() == 'h264':
                 # Add H.264-specific parameters for maximum compatibility
                 cmd.extend(['-pix_fmt', 'yuv420p'])
