@@ -535,14 +535,15 @@ class VideoAnalyzer:
         else:
             search_extensions = self.VIDEO_EXTENSIONS
 
-        # Search for files
+        # Single directory traversal — filter by extension in Python.
+        # Much faster than running a separate glob per extension (48+ passes).
         if recursive:
-            for ext in search_extensions:
-                pattern = ''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)
-                video_files.extend(directory.rglob(f'*{pattern}'))
+            for entry in directory.rglob('*'):
+                if entry.is_file() and entry.suffix.lower() in search_extensions:
+                    video_files.append(entry)
         else:
-            for ext in search_extensions:
-                pattern = ''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)
-                video_files.extend(directory.glob(f'*{pattern}'))
+            for entry in directory.iterdir():
+                if entry.is_file() and entry.suffix.lower() in search_extensions:
+                    video_files.append(entry)
 
         return sorted(video_files)

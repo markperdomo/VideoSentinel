@@ -374,6 +374,13 @@ class DuplicateDetector:
         group_id = 0
         filtered_count = 0
 
+        # Count files that need duration checking for progress reporting
+        groups_with_dupes = {name: vids for name, vids in filename_groups.items() if len(vids) > 1}
+        need_duration_check = check_duration and analyzer is not None and groups_with_dupes
+        if need_duration_check:
+            total_to_probe = sum(len(vids) for vids in groups_with_dupes.values())
+            probed = 0
+
         for normalized_name, videos in filename_groups.items():
             if len(videos) > 1:
                 # If duration checking enabled and analyzer available, filter by duration
@@ -384,6 +391,9 @@ class DuplicateDetector:
                         info = analyzer.get_video_info(video)
                         if info and info.duration > 0:
                             video_info_map[video] = info
+                        probed += 1
+                        if probed % 10 == 0 or probed == total_to_probe:
+                            console.print(f"  Checking durations: {probed}/{total_to_probe} files\r", end="")
 
                     # Group videos by similar duration
                     duration_groups = []
@@ -425,6 +435,9 @@ class DuplicateDetector:
                     # No duration checking, add all files with matching filenames
                     duplicate_groups[f"group_{group_id}"] = videos
                     group_id += 1
+
+        if need_duration_check:
+            console.print()  # Clear the progress line
 
         if self.verbose:
             console.print(f"Found {len(duplicate_groups)} filename-based duplicate groups")
