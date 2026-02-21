@@ -5,7 +5,7 @@ Provides a centralized Rich console and common UI helpers.
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
+from rich.table import Column, Table
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -70,7 +70,10 @@ def create_scan_progress() -> Progress:
     """
     return Progress(
         SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
+        TextColumn(
+            "[progress.description]{task.description}",
+            table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
+        ),
         BarColumn(),
         MofNCompleteColumn(),
         TimeRemainingColumn(),
@@ -98,7 +101,10 @@ def create_batch_progress() -> Progress:
     """
     return Progress(
         SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
+        TextColumn(
+            "[progress.description]{task.description}",
+            table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
+        ),
         BarColumn(),
         TaskProgressColumn(),
         MofNCompleteColumn(),
@@ -114,16 +120,22 @@ def create_encoding_progress() -> Progress:
     Shows: spinner, description, bar, percentage, speed, ETA.
     transient=True so the bar disappears after completion.
 
+    The description column uses ratio=1 to fill remaining space, keeping
+    the bar and stats anchored to the right regardless of filename length.
+
     Supports multiple tasks so batch_re_encode can add an overall
     task alongside the per-file encoding task.
     """
     return Progress(
         SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
+        TextColumn(
+            "[progress.description]{task.description}",
+            table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
+        ),
         BarColumn(bar_width=30),
         TaskProgressColumn(),
-        TextColumn("{task.fields[speed]}"),
-        TextColumn("{task.fields[eta]}"),
+        TextColumn("{task.fields[speed]}", table_column=Column(width=8)),
+        TextColumn("{task.fields[eta]}", table_column=Column(width=14)),
         console=console,
         transient=True,
     )
@@ -139,6 +151,9 @@ def create_queue_progress() -> Progress:
       3. Encoding progress (with speed + ETA from FFmpeg)
       4. Upload status line
 
+    The description column uses ratio=1 to fill remaining space, keeping
+    the bar and stats anchored to the right regardless of filename length.
+
     Usage:
         with create_queue_progress() as progress:
             overall = progress.add_task("Pipeline", total=N, speed="", eta="")
@@ -148,11 +163,14 @@ def create_queue_progress() -> Progress:
     """
     return Progress(
         SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
+        TextColumn(
+            "[progress.description]{task.description}",
+            table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
+        ),
         BarColumn(bar_width=30),
         TaskProgressColumn(),
-        TextColumn("{task.fields[speed]}"),
-        TextColumn("{task.fields[eta]}"),
+        TextColumn("{task.fields[speed]}", table_column=Column(width=8)),
+        TextColumn("{task.fields[eta]}", table_column=Column(width=14)),
         console=console,
         transient=True,
     )
