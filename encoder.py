@@ -385,8 +385,9 @@ class VideoEncoder:
                 # Add macOS QuickLook compatibility
                 # Use hvc1 tag instead of hev1 for Apple device compatibility
                 cmd.extend(['-tag:v', 'hvc1'])
-                # Ensure yuv420p pixel format for maximum compatibility
-                cmd.extend(['-pix_fmt', 'yuv420p'])
+                # Use 10-bit pixel format for better quality (less banding) at same file size
+                # macOS QuickLook supports 10-bit HEVC natively since High Sierra
+                cmd.extend(['-pix_fmt', 'yuv420p10le'])
                 # Add movflags for better QuickLook compatibility
                 cmd.extend(['-movflags', 'faststart'])
                 # Build x265 params
