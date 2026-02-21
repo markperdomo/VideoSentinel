@@ -89,9 +89,11 @@ class VideoCache:
 
         try:
             stat = file_path.stat()
-            # Compare mtime truncated to seconds — sub-second precision is unreliable
-            # on network filesystems (SMB/NFS) and across JSON float round-trips
-            if int(entry.get('mtime', 0)) == int(stat.st_mtime) and entry.get('size') == stat.st_size:
+            # Use file size as the primary cache key — video files are large enough
+            # that a size match is essentially a content match. Mtime alone is
+            # unreliable because NAS media scanners, backup tools, and filesystem
+            # maintenance routinely touch files without modifying content.
+            if entry.get('size') == stat.st_size:
                 return VideoInfo.from_dict(entry['info'])
         except OSError:
             pass
@@ -104,15 +106,14 @@ class VideoCache:
             stat = file_path.stat()
             key = str(file_path.resolve())
             self.cache[key] = {
-                'mtime': int(stat.st_mtime),
                 'size': stat.st_size,
                 'info': info.to_dict()
             }
             self.modified = True
             self.updates_count += 1
 
-            # Auto-save periodically
-            if self.updates_count >= 50:
+            # Auto-save periodically (every 100 new entries)
+            if self.updates_count >= 100:
                 self.save()
         except OSError:
             pass

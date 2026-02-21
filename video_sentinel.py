@@ -729,6 +729,9 @@ def main():
 
                 progress.advance(overall)
 
+        # Save cache after bulk analysis to avoid losing probed results
+        analyzer.save_cache()
+
         # Print results after progress bar is gone
         console.print()
         console.print(f"Summary: [success]{len(compliant_videos)} compliant[/success], [error]{len(non_compliant_videos)} non-compliant[/error], [warning]{len(failed_analyses)} failed analysis[/warning]")
@@ -1157,6 +1160,9 @@ def main():
             )
         else:
             duplicate_groups, failed_videos = duplicate_detector.find_duplicates(video_files)
+
+        # Save cache after bulk probing during duplicate detection
+        analyzer.save_cache()
 
         if failed_videos:
             console.print()
