@@ -36,6 +36,7 @@ class VideoInfo:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'VideoInfo':
         """Create from dictionary"""
+        data = data.copy()  # Don't mutate the original — it lives in the cache dict
         data['file_path'] = Path(data['file_path'])
         # Ensure resolution is a tuple (JSON loads as list)
         if 'resolution' in data:
@@ -74,12 +75,13 @@ class VideoCache:
             # Atomic write pattern
             temp_file = self.cache_file.with_suffix('.tmp')
             with open(temp_file, 'w') as f:
-                json.dump(self.cache, f, indent=2)
+                json.dump(self.cache, f, separators=(',', ':'))
             temp_file.replace(self.cache_file)
             self.modified = False
             self.updates_count = 0
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"Warning: Failed to save cache: {e}", file=sys.stderr)
 
     def get(self, file_path: Path) -> Optional[VideoInfo]:
         """Get cached info if valid"""
