@@ -24,7 +24,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import logging
 from shutdown_manager import shutdown_requested
-from ui import console, section_header, create_queue_progress
+from ui import console, section_header, create_queue_progress, fit_filename
 
 
 class FileState(Enum):
@@ -261,7 +261,7 @@ class NetworkQueueManager:
                     if self._progress and self._dl_task is not None:
                         self._progress.update(
                             self._dl_task,
-                            description=f"[dim]Download:[/dim] {source.name}",
+                            description=f"[dim]Download:[/dim] {fit_filename(source.name)}",
                         )
 
                     if self.verbose:
@@ -354,7 +354,7 @@ class NetworkQueueManager:
                     if self._progress and self._enc_task is not None:
                         self._progress.update(
                             self._enc_task,
-                            description=f"[dim]Encode:[/dim]   {local_input.name}",
+                            description=f"[dim]Encode:[/dim]   {fit_filename(local_input.name)}",
                             speed="", eta="",
                         )
 
@@ -467,7 +467,7 @@ class NetworkQueueManager:
                     if self._progress and self._ul_task is not None:
                         self._progress.update(
                             self._ul_task,
-                            description=f"[dim]Upload:[/dim]   {output.name} \u2192 {final.name}",
+                            description=f"[dim]Upload:[/dim]   {fit_filename(final.name)}",
                         )
 
                     # Copy encoded file to network destination
@@ -500,7 +500,7 @@ class NetworkQueueManager:
                     if self._progress and self._ul_task is not None:
                         self._progress.update(
                             self._ul_task,
-                            description=f"[dim]Upload:[/dim]   [success]\u2713 {final.name}[/success]",
+                            description=f"[dim]Upload:[/dim]   [success]\u2713 {fit_filename(final.name)}[/success]",
                         )
 
                 except Exception as e:
