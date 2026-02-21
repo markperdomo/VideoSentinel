@@ -51,6 +51,8 @@ class VideoCache:
         self.cache: Dict[str, Dict[str, Any]] = {}
         self.modified = False
         self.updates_count = 0
+        self.hits = 0
+        self.misses = 0
         self.load()
 
     def load(self):
@@ -81,10 +83,11 @@ class VideoCache:
 
     def get(self, file_path: Path) -> Optional[VideoInfo]:
         """Get cached info if valid"""
-        key = str(file_path.resolve())
+        key = str(file_path.absolute())
         entry = self.cache.get(key)
 
         if not entry:
+            self.misses += 1
             return None
 
         try:
@@ -94,17 +97,19 @@ class VideoCache:
             # unreliable because NAS media scanners, backup tools, and filesystem
             # maintenance routinely touch files without modifying content.
             if entry.get('size') == stat.st_size:
+                self.hits += 1
                 return VideoInfo.from_dict(entry['info'])
         except OSError:
             pass
 
+        self.misses += 1
         return None
 
     def set(self, file_path: Path, info: VideoInfo):
         """Update cache entry"""
         try:
             stat = file_path.stat()
-            key = str(file_path.resolve())
+            key = str(file_path.absolute())
             self.cache[key] = {
                 'size': stat.st_size,
                 'info': info.to_dict()
@@ -178,9 +183,19 @@ class VideoAnalyzer:
                     print(f"Warning: Could not initialize cache: {e}")
 
     def save_cache(self):
-        """Manually save the cache to disk"""
+        """Manually save the cache to disk and report stats"""
         if self.cache:
+            if self.cache.hits + self.cache.misses > 0:
+                total = self.cache.hits + self.cache.misses
+                from ui import console
+                console.print(
+                    f"[dim]Cache: {self.cache.hits}/{total} hits "
+                    f"({len(self.cache.cache)} entries on disk)[/dim]"
+                )
             self.cache.save()
+            # Reset counters for next phase
+            self.cache.hits = 0
+            self.cache.misses = 0
 
     def is_video_file(self, file_path: Path) -> bool:
         """Check if file is a video based on extension"""
