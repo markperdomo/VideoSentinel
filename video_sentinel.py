@@ -583,9 +583,10 @@ def main():
                     file_types=file_types_filter
                 ))
 
-    # Note: For re-encoding operations, max-files limit is applied AFTER filtering
-    # to files that need encoding (smarter behavior). For other operations, apply it here.
-    if args.max_files and not args.re_encode and len(video_files) > args.max_files:
+    # Note: For re-encoding and quicklook fix operations, max-files limit is applied
+    # AFTER filtering to files that need processing (smarter behavior).
+    # For other operations, apply it here.
+    if args.max_files and not args.re_encode and not args.fix_quicklook and len(video_files) > args.max_files:
         console.print(f"Limiting to first {args.max_files} files (found {len(video_files)} total)")
         video_files = video_files[:args.max_files]
 
@@ -989,6 +990,15 @@ def main():
 
             # Combine all videos that need fixing (remux or re-encode)
             all_videos_to_fix = videos_to_remux + videos_to_reencode
+
+            # Apply max-files limit to the actual work list (not discovery)
+            if args.max_files and len(all_videos_to_fix) > args.max_files:
+                console.print(f"Limiting to first {args.max_files} files needing fixes (found {len(all_videos_to_fix)} total)")
+                all_videos_to_fix = all_videos_to_fix[:args.max_files]
+                # Update sublists to match
+                remux_set = set(videos_to_remux)
+                videos_to_remux = [v for v in all_videos_to_fix if v in remux_set]
+                videos_to_reencode = [v for v in all_videos_to_fix if v not in remux_set]
 
             # Process with queue mode if enabled
             if all_videos_to_fix and args.queue_mode:
