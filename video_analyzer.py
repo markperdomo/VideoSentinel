@@ -432,11 +432,18 @@ class VideoAnalyzer:
                     issues.append(f"HEVC tag is {codec_tag}, should be hvc1 for QuickLook")
                     needs_remux = True  # Tag change only needs remux, not re-encode
 
-            # Check 4: Pixel format should be yuv420p
+            # Check 4: Pixel format compatibility
+            # macOS QuickLook supports 10-bit HEVC natively (since High Sierra),
+            # so only force re-encode for truly unsupported pixel formats.
             pix_fmt = video_stream.get('pix_fmt', '').lower()
             if pix_fmt and pix_fmt != 'yuv420p':
-                issues.append(f"Pixel format is {pix_fmt}, should be yuv420p")
-                needs_reencode = True
+                # HEVC supports 10-bit 4:2:0 in QuickLook via hardware decoder
+                hevc_compatible_fmts = {'yuv420p', 'yuv420p10le', 'yuv420p10be'}
+                if codec_name in ['hevc', 'h265'] and pix_fmt in hevc_compatible_fmts:
+                    pass  # 10-bit HEVC is QuickLook compatible, no action needed
+                else:
+                    issues.append(f"Pixel format is {pix_fmt}, needs re-encode for QuickLook")
+                    needs_reencode = True
 
             # Check 4: Faststart flag (check if moov atom is at the beginning)
             # This is harder to check programmatically, but we can infer from format tags
