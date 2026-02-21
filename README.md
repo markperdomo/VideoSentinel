@@ -1,30 +1,43 @@
 # VideoSentinel
 
-A Python CLI utility for managing and validating video libraries. Ensures videos are properly encoded to modern specifications, detects duplicates using perceptual hashing, and identifies encoding issues.
+A Python CLI utility that intelligently brings video libraries up to modern standards. VideoSentinel analyzes your collection, re-encodes legacy formats to space-efficient modern codecs, ensures macOS QuickLook compatibility for instant Finder previews, and detects duplicates — all while preserving visual quality through smart bitrate analysis.
+
+The core idea: you shouldn't need to manually audit thousands of video files to figure out which ones are wasting space in ancient codecs, which ones won't preview in Finder, or which ones are duplicates. VideoSentinel handles all of this automatically, with sensible defaults and safety-first design (originals are never deleted unless you explicitly ask).
 
 ## Features
 
-### Core Capabilities
-- **Process video paths from a text file**: Use `--file-list` to provide paths directly, one per line.
-- **Modern Codec Validation & Re-encoding**: Detect and re-encode videos to HEVC/H.265, AV1, or VP9 with smart quality matching
-- **Duplicate Detection**: Perceptual hash-based (10-frame comparison) or filename-based (fast alternative)
-- **Quality Ranking**: Automatic best-quality selection using codec efficiency, resolution, and bitrate analysis
-- **macOS QuickLook Fixes**: Fast remux (MKV→MP4) or re-encode to fix Finder previews
-- **Error Recovery**: Salvage corrupted videos with FFmpeg error-tolerant decoding
-- **Downscaling**: Reduce videos >1080p while preserving aspect ratio
-- **Library Statistics**: Get a breakdown of video codecs and their storage usage with `--stats`
-- **Recursive Scanning**: Process directories recursively with `-r` or `--recursive`
-- **Corruption Detection**: Identify encoding issues and corrupted files with `--check-issues` and perform a full integrity check with `--deep-scan`
-- **Sample Video Generation**: Create sample FFmpeg files for unique codec/resolution permutations found in a library.
+### Modernize Your Library
+- **Smart Re-encoding**: Automatically identifies videos in legacy codecs (MPEG2, MPEG4, WMV, XviD, etc.) and re-encodes them to HEVC/H.265, AV1, or VP9
+- **Quality-Matched Encoding**: Analyzes source bitrate-per-pixel to calculate optimal CRF — high-quality sources get low CRF to preserve detail, low-quality sources get higher CRF to avoid wasting space
+- **10-bit HEVC Output**: Encodes to 10-bit color depth (yuv420p10le) by default for better gradient reproduction and less banding at the same file size
+- **Downscaling**: Optionally reduce videos larger than 1080p while preserving aspect ratio
 
-### Performance & Safety
-- **Network Queue Mode**: 3-stage pipeline (download→encode→upload) for 2-3x faster encoding on network storage
-- **Smart Resume**: Validates existing outputs, skips completed work, survives interruptions
-- **Graceful Shutdown**: Press 'q' to stop cleanly after current video
+### macOS QuickLook Compatibility
+- **Instant Finder Previews**: Fixes videos that won't preview in macOS Finder/QuickLook
+- **Fast Remux Path**: Videos that just need a container change (MKV to MP4) or HEVC tag fix (hev1 to hvc1) are remuxed in seconds — no re-encoding
+- **10-bit HEVC Support**: Correctly identifies 10-bit HEVC as QuickLook-compatible (supported since macOS High Sierra), avoiding unnecessary re-encodes
+- **Faststart Metadata**: Adds `-movflags faststart` so previews load instantly without downloading the entire file
+
+### Duplicate Detection
+- **Perceptual Hashing**: Compares 10 evenly-spaced frames per video using perceptual hashes — finds duplicates even across different encodings, resolutions, and quality levels
+- **Filename Matching**: Fast alternative that groups files by normalized name (strips suffixes like `_reencoded`, `_quicklook`, `_backup`, copy numbering, etc.)
+- **Duration Verification**: Filename duplicates are cross-checked by duration to avoid false matches
+- **Smart Quality Ranking**: Automatically keeps the best version based on codec efficiency, resolution, container format, and QuickLook compatibility
+
+### Performance
+- **Network Queue Mode**: 3-stage pipeline (download → encode → upload) runs all three stages in parallel for 2-3x faster encoding on network/NAS storage
+- **Analysis Caching**: Caches ffprobe results to disk so repeat scans are near-instant — handles NAS quirks like mtime changes from media scanners
+- **Single-Pass File Discovery**: Scans directories once regardless of how many video extensions are supported (48+)
+- **Smart Resume**: Validates existing outputs, skips completed work, and picks up exactly where it left off after interruptions
+- **Graceful Shutdown**: Press 'q' to stop cleanly after the current video finishes
+
+### Safety & Control
+- **Originals Preserved by Default**: Re-encoded files get a `_reencoded` suffix — originals are only deleted with explicit `--replace-original`
+- **Output Validation**: Every re-encoded file is validated (ffprobe readability, dimensions, duration match) before the original is touched
+- **Batch Control**: Filter by file type (`--file-types wmv,avi`), limit batch size (`--max-files 10`), or target specific codecs (`--target-codec av1`)
 - **Real-time Progress**: Live encoding stats with visual progress bars, speed multiplier, and ETA
-- **Output Validation**: Thoroughly validates re-encoded files before replacing originals
-- **Batch Control**: Filter by file type (`--file-types`), limit batch size (`--max-files`)
-- **Flexible Output Options**: Specify a target codec (`--target-codec`), a custom output directory (`--output-dir`), or replace original files (`--replace-original`)
+- **Error Recovery Mode**: Salvage corrupted videos with FFmpeg error-tolerant decoding flags
+- **Timestamp Normalization**: Handles source files with non-standard timebases that would otherwise crash the encoder
 
 ## Installation
 
@@ -47,7 +60,7 @@ choco install ffmpeg
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/VideoSentinel.git
+git clone https://github.com/markperdomo/VideoSentinel.git
 cd VideoSentinel
 
 # Install Python dependencies
@@ -56,94 +69,104 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Basic Operations
+### Scan and fix everything in one shot
 ```bash
-# Process a list of video files from a text file and check their specifications
-python video_sentinel.py --file-list /path/to/my_video_list.txt --check-specs
+# Check what needs updating, re-encode legacy codecs, and fix QuickLook — all at once
+python video_sentinel.py /path/to/videos -r --check-specs --re-encode --fix-quicklook --replace-original
 
-# Check encoding specifications
-python video_sentinel.py /path/to/videos --check-specs
-
-# Re-encode non-compliant videos to HEVC
-python video_sentinel.py /path/to/videos --check-specs --re-encode
-
-# Fix macOS QuickLook/Finder preview issues (fast remux)
-python video_sentinel.py /path/to/videos --check-specs --fix-quicklook
+# Same thing but on network storage with the fast pipeline
+python video_sentinel.py /Volumes/NAS/videos -r --check-specs --re-encode --fix-quicklook --replace-original --queue-mode
 ```
 
-### Library Statistics
+### Step by step
 ```bash
-# Get a breakdown of video codecs and their storage usage
-python video_sentinel.py /path/to/videos --stats --recursive
+# 1. See what you're working with
+python video_sentinel.py /path/to/videos -r --stats
+
+# 2. Check which videos need modernizing
+python video_sentinel.py /path/to/videos -r --check-specs
+
+# 3. Re-encode non-compliant videos to HEVC (originals kept by default)
+python video_sentinel.py /path/to/videos -r --check-specs --re-encode
+
+# 4. Fix QuickLook previews (fast remux for most files)
+python video_sentinel.py /path/to/videos -r --fix-quicklook
+
+# 5. Find and clean up duplicates
+python video_sentinel.py /path/to/videos -r --find-duplicates --duplicate-action auto-best
 ```
 
-### Duplicate Management
+### Common workflows
 ```bash
-# Find duplicates (perceptual hash-based)
-python video_sentinel.py /path/to/videos --find-duplicates
+# Process a list of specific files
+python video_sentinel.py --file-list /path/to/my_video_list.txt --check-specs --re-encode
 
-# Auto-delete duplicates, keeping highest quality
-python video_sentinel.py /path/to/videos --find-duplicates --duplicate-action auto-best
+# Only process WMV and AVI files
+python video_sentinel.py /path/to/videos -r --check-specs --re-encode --file-types wmv,avi
 
-# Find duplicates by filename only (fast, for broken files)
-python video_sentinel.py /path/to/videos --find-duplicates --filename-duplicates
+# Test with a small batch first
+python video_sentinel.py /path/to/videos -r --check-specs --re-encode --max-files 5
+
+# Downscale 4K to 1080p during re-encode
+python video_sentinel.py /path/to/videos -r --check-specs --re-encode --downscale-1080p --replace-original
+
+# Recover corrupted videos
+python video_sentinel.py /path/to/broken -r --check-specs --re-encode --recover
+
+# Find duplicates by filename (fast, works with broken files)
+python video_sentinel.py /path/to/videos -r --filename-duplicates --duplicate-action auto-best
+
+# Check for encoding issues and corruption
+python video_sentinel.py /path/to/videos -r --check-issues --deep-scan
+
+# Monitor a running queue mode session from another terminal
+python monitor_queue.py
+
+# Force remux all MKV files to MP4
+python video_sentinel.py /path/to/videos -r --force-remux-mkv --replace-original
 ```
-
-### Advanced Encoding
-```bash
-# Downscale 4K→1080p and replace originals
-python video_sentinel.py /path/to/videos --check-specs --re-encode --downscale-1080p --replace-original
-
-# Network storage: 3-stage pipeline for 2-3x speed boost
-python video_sentinel.py /Volumes/Network/videos --check-specs --re-encode --queue-mode
-
-# Recover corrupted/broken videos
-python video_sentinel.py /path/to/broken --check-specs --re-encode --recover
-
-# Process specific file types only
-python video_sentinel.py /path/to/videos --check-specs --file-types wmv,avi,mov
-
-# Limit batch size for testing
-python video_sentinel.py /path/to/videos --check-specs --re-encode --max-files 10
-
-# Detect encoding issues
-python video_sentinel.py /path/to/videos --check-issues
-
-# Perform a deep scan for corruption (slower)
-python video_sentinel.py /path/to/videos --check-issues --deep-scan
-
-# Force remuxing of all MKV files to MP4
-python video_sentinel.py /path/to/videos --force-remux-mkv --replace-original
-
-# Generate sample video files for unique codec/resolution combinations
-python video_sentinel.py /path/to/videos --create-samples
-
-```
-
-See [docs/USAGE.md](docs/USAGE.md) for comprehensive examples and advanced usage.
 
 ## How It Works
 
+### Smart Quality Matching
+VideoSentinel doesn't just blindly re-encode at a fixed quality level. It analyzes each source video's bits-per-pixel (bpp) to determine how much quality headroom the source has, then picks a codec-specific CRF that preserves perceived quality:
+
+| Source Quality | Bits/Pixel | HEVC CRF | AV1 CRF | H.264 CRF |
+|----------------|-----------|-----------|---------|------------|
+| Very high (4K Bluray) | >0.25 | 18 | 20 | 16 |
+| High (good 1080p) | >0.15 | 20 | 24 | 18 |
+| Medium | >0.07 | 23 | 30 | 21 |
+| Low | <0.05 | 28 | 32 | 26 |
+
+All HEVC output uses 10-bit color depth (yuv420p10le) for better gradient handling at no file size penalty.
+
+### QuickLook Fix Decision Tree
+For each video that already uses a modern codec:
+1. **Wrong container** (e.g., MKV) or **wrong HEVC tag** (hev1 instead of hvc1) → **Fast remux** (seconds, no quality loss)
+2. **Unsupported pixel format** for the codec → **Full re-encode** (only when truly necessary)
+3. **10-bit HEVC in MP4 with hvc1 tag** → **Already compatible**, skip
+
 ### Architecture
 Modular design with clear separation of concerns:
-- **video_analyzer.py**: FFprobe metadata extraction, QuickLook compatibility checking
-- **duplicate_detector.py**: 10-frame perceptual hashing, filename matching
-- **encoder.py**: Smart CRF calculation, quality-matched re-encoding
-- **network_queue_manager.py**: Download→encode→upload pipeline with state persistence
-- **shutdown_manager.py**: Thread-safe graceful shutdown (press 'q')
-- **stats.py**: Video codec and size statistics
-- **issue_detector.py**: Detects encoding issues and corruption
+- **video_sentinel.py** — CLI orchestration, no business logic
+- **video_analyzer.py** — FFprobe metadata extraction, QuickLook compatibility checking, analysis caching
+- **encoder.py** — Smart CRF calculation, quality-matched re-encoding, output validation
+- **duplicate_detector.py** — 10-frame perceptual hashing, filename matching with duration verification
+- **network_queue_manager.py** — Download → encode → upload pipeline with state persistence
+- **issue_detector.py** — Quick and deep corruption scanning
+- **shutdown_manager.py** — Thread-safe graceful shutdown (press 'q')
+- **stats.py** — Codec distribution and storage usage statistics
+- **monitor_queue.py** — Standalone queue monitoring utility
 
-### Key Algorithms
-- **Smart Quality Matching**: CRF calculated from source bits-per-pixel and codec efficiency multipliers (AV1: 2.5×, HEVC: 2.0×, H.264: 1.0×)
-- **Quality Ranking**: Newly processed files get +50K priority bonus, followed by QuickLook compatibility, container format, codec modernity, resolution, and normalized bitrate
-- **Perceptual Hashing**: 10 evenly-spaced frames per video, 12×12 phash, ≤15 Hamming distance threshold
-- **Resume Safety**: Validates existing `_reencoded`/`_quicklook` outputs, skips completed work, handles interrupted operations
+### Tdarr Integration
+Two JavaScript plugins bring VideoSentinel's encoding logic to the Tdarr distributed transcoding framework:
+- **Tdarr_Plugin_MC93_Migz1FFMPEG_CPU_modified.js** — Bitrate-based HEVC transcode with Apple compatibility
+- **Tdarr_Plugin_vsAIQ.js** — VideoSentinel's smart CRF quality algorithm as a Tdarr plugin
 
 ## Requirements
 
 - **Python 3.7+**
-- **FFmpeg** (system dependency - install via brew/apt/choco)
+- **FFmpeg** (system dependency — install via brew/apt/choco)
 - **Python packages**: opencv-python, imagehash, Pillow, ffmpeg-python, tqdm (see requirements.txt)
 
 ## Contributing
@@ -158,4 +181,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Detailed Usage Guide](docs/USAGE.md)
 - [Architecture Documentation](CLAUDE.md)
-- [Issue Tracker](https://github.com/yourusername/VideoSentinel/issues)
+- [Issue Tracker](https://github.com/markperdomo/VideoSentinel/issues)
