@@ -3,6 +3,7 @@ Shared UI module for VideoSentinel
 Provides a centralized Rich console and common UI helpers.
 """
 
+import os
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Column, Table
@@ -61,6 +62,21 @@ def warning(message: str):
 def info(message: str):
     """Print an info message."""
     console.print(f"[info]\u2139[/info] {message}")
+
+
+def fit_filename(name: str, width: int = 40) -> str:
+    """Pad or truncate a filename to exactly *width* characters.
+
+    Short names are right-padded with spaces.  Long names keep the first
+    and last portions with an ellipsis in the middle so the extension
+    stays visible (e.g. ``very_long_na…encoded.mp4``).
+    """
+    if len(name) <= width:
+        return name.ljust(width)
+    # Keep extension visible: split into stem + tail
+    keep_end = min(12, width // 3)
+    keep_start = width - keep_end - 1  # 1 char for ellipsis
+    return name[:keep_start] + "\u2026" + name[-keep_end:]
 
 
 def create_scan_progress() -> Progress:

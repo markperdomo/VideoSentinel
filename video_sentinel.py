@@ -22,7 +22,7 @@ from network_queue_manager import NetworkQueueManager
 from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
 from stats import StatsCollector
 from sample_generator import create_sample_video
-from ui import console, section_header, success, error, warning, create_scan_progress, create_batch_progress
+from ui import console, section_header, success, error, warning, create_scan_progress, create_batch_progress, fit_filename
 
 
 def rank_video_quality(video_path: Path, video_info: VideoInfo, analyzer: VideoAnalyzer = None) -> int:
@@ -664,7 +664,7 @@ def main():
                 overall = progress.add_task("Remuxing MKV files", total=len(videos_to_remux))
                 current = progress.add_task("", total=None)
                 for video_path in videos_to_remux:
-                    progress.update(current, description=video_path.name)
+                    progress.update(current, description=fit_filename(video_path.name))
                     output_path = video_path.with_suffix('.mp4')
 
                     if output_path == video_path:
@@ -708,7 +708,7 @@ def main():
             overall = progress.add_task("Analyzing videos", total=len(video_files))
             current = progress.add_task("", total=None)
             for video_path in video_files:
-                progress.update(current, description=video_path.name)
+                progress.update(current, description=fit_filename(video_path.name))
                 video_info = analyzer.get_video_info(video_path)
 
                 if not video_info or not video_info.is_valid:
@@ -772,7 +772,7 @@ def main():
                 overall = progress.add_task("Checking for existing outputs", total=len(non_compliant_videos))
                 current = progress.add_task("", total=None)
                 for video_path, video_info in non_compliant_videos:
-                    progress.update(current, description=video_path.name)
+                    progress.update(current, description=fit_filename(video_path.name))
                     existing_output = encoder.find_existing_output(video_path, target_codec=args.target_codec)
 
                     if existing_output:
@@ -927,7 +927,7 @@ def main():
                 overall = progress.add_task("Checking QuickLook compatibility", total=len(compliant_videos))
                 current = progress.add_task("", total=None)
                 for video_path in compliant_videos:
-                    progress.update(current, description=video_path.name)
+                    progress.update(current, description=fit_filename(video_path.name))
                     compat = analyzer.check_quicklook_compatibility(video_path)
 
                     if compat['needs_remux']:
@@ -957,7 +957,7 @@ def main():
                     overall = progress.add_task("Checking for existing outputs", total=len(all_videos_to_check))
                     current = progress.add_task("", total=None)
                     for video_path in all_videos_to_check:
-                        progress.update(current, description=video_path.name)
+                        progress.update(current, description=fit_filename(video_path.name))
                         existing_output = encoder.find_existing_output(
                             video_path,
                             target_codec=args.target_codec,
@@ -1332,7 +1332,7 @@ def main():
             overall = progress.add_task(scan_desc, total=len(video_files))
             current = progress.add_task("", total=None)
             for video_path in video_files:
-                progress.update(current, description=video_path.name)
+                progress.update(current, description=fit_filename(video_path.name))
                 issues = issue_detector.scan_video(video_path, deep_scan=args.deep_scan)
 
                 if issues:

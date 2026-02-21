@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from video_analyzer import VideoInfo
 from shutdown_manager import shutdown_requested
-from ui import console, section_header, create_encoding_progress
+from ui import console, section_header, create_encoding_progress, fit_filename
 
 
 class VideoEncoder:
@@ -471,18 +471,20 @@ class VideoEncoder:
                         rich_progress = progress
                         task = file_task
                         # Reset the file task for this file
+                        fname = fit_filename(input_path.name)
                         if total_seconds > 0:
-                            rich_progress.update(task, description=f"  {input_path.name}", completed=0, total=1000, speed="", eta="")
+                            rich_progress.update(task, description=f"  {fname}", completed=0, total=1000, speed="", eta="")
                         else:
-                            rich_progress.update(task, description=f"  {input_path.name}", completed=0, total=None, speed="", eta="")
+                            rich_progress.update(task, description=f"  {fname}", completed=0, total=None, speed="", eta="")
                     else:
                         # Standalone mode - create our own Progress context
                         rich_progress = create_encoding_progress()
                         rich_progress.start()
+                        fname = fit_filename(input_path.name)
                         if total_seconds > 0:
-                            task = rich_progress.add_task(f"  {input_path.name}", total=1000, speed="", eta="")
+                            task = rich_progress.add_task(f"  {fname}", total=1000, speed="", eta="")
                         else:
-                            task = rich_progress.add_task(f"  {input_path.name}", total=None, speed="", eta="")
+                            task = rich_progress.add_task(f"  {fname}", total=None, speed="", eta="")
 
                     while True:
                         # Check for shutdown signal before reading line
