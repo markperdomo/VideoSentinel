@@ -300,12 +300,21 @@ class VideoAnalyzer:
             height = int(video_stream.get('height', 0))
 
             # Calculate FPS
-            fps_str = video_stream.get('r_frame_rate', '0/1')
-            try:
-                num, den = map(int, fps_str.split('/'))
-                fps = num / den if den != 0 else 0.0
-            except:
-                fps = 0.0
+            # Prefer avg_frame_rate (actual average) over r_frame_rate (guessed).
+            # r_frame_rate can report the timebase (e.g. 16000/1) instead of the
+            # real framerate on files with non-standard timestamp configurations.
+            fps = 0.0
+            for fps_key in ('avg_frame_rate', 'r_frame_rate'):
+                fps_str = video_stream.get(fps_key, '0/1')
+                try:
+                    num, den = map(int, fps_str.split('/'))
+                    candidate = num / den if den != 0 else 0.0
+                    # Sanity check: real video fps is virtually always ≤ 240
+                    if 0 < candidate <= 240:
+                        fps = candidate
+                        break
+                except (ValueError, ZeroDivisionError):
+                    continue
 
             # Get format information
             format_info = data.get('format', {})

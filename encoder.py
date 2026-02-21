@@ -355,6 +355,9 @@ class VideoEncoder:
             # its own threading via -x265-params). Thread control for x265 is
             # handled below via pools/frame-threads params.
 
+            # Normalize video track timescale to avoid "pts/dts pair unsupported"
+            # muxer errors from sources with non-standard timebases (e.g. 16k tbr).
+            cmd.extend(['-video_track_timescale', '90000'])
 
             # Add audio filter to handle problematic channel layouts
             # This fixes issues like "Unsupported channel layout '6 channels'"
