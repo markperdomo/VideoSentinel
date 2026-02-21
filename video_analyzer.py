@@ -81,7 +81,7 @@ class VideoCache:
 
     def get(self, file_path: Path) -> Optional[VideoInfo]:
         """Get cached info if valid"""
-        key = str(file_path.absolute())
+        key = str(file_path.resolve())
         entry = self.cache.get(key)
 
         if not entry:
@@ -89,8 +89,9 @@ class VideoCache:
 
         try:
             stat = file_path.stat()
-            # Check if file hasn't changed (mtime and size match)
-            if entry.get('mtime') == stat.st_mtime and entry.get('size') == stat.st_size:
+            # Compare mtime truncated to seconds — sub-second precision is unreliable
+            # on network filesystems (SMB/NFS) and across JSON float round-trips
+            if int(entry.get('mtime', 0)) == int(stat.st_mtime) and entry.get('size') == stat.st_size:
                 return VideoInfo.from_dict(entry['info'])
         except OSError:
             pass
@@ -101,9 +102,9 @@ class VideoCache:
         """Update cache entry"""
         try:
             stat = file_path.stat()
-            key = str(file_path.absolute())
+            key = str(file_path.resolve())
             self.cache[key] = {
-                'mtime': stat.st_mtime,
+                'mtime': int(stat.st_mtime),
                 'size': stat.st_size,
                 'info': info.to_dict()
             }
