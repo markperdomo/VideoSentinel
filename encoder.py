@@ -571,17 +571,15 @@ class VideoEncoder:
 
                 # Check return code
                 if process.returncode != 0:
-                    if not use_external_progress:
-                        console.print(f"[error]\u2717 Error encoding {input_path.name}[/error]")
-                        for line in error_output[-10:]:
-                            if line.strip():
-                                console.print(f"  {line.rstrip()}", style="dim")
+                    console.print(f"[error]\u2717 Error encoding {input_path.name}[/error]")
+                    for line in error_output[-10:]:
+                        if line.strip():
+                            console.print(f"  {line.rstrip()}", style="dim")
                     return False
 
                 # Validate output before considering it successful
                 if not self._validate_output(output_path, video_info, lenient=self.recovery_mode):
-                    if not use_external_progress:
-                        console.print(f"[error]\u2717 Output validation failed for {input_path.name}[/error]")
+                    console.print(f"[error]\u2717 Output validation failed for {input_path.name}[/error]")
                     if output_path.exists():
                         output_path.unlink()
                     return False

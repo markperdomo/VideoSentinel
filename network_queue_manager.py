@@ -392,7 +392,13 @@ class NetworkQueueManager:
 
                         completed_count += 1
                     else:
-                        error_msg = "Encoding failed or output missing"
+                        # Build a descriptive error message
+                        if not success and local_output.exists():
+                            error_msg = "Encoding succeeded but output failed validation (duration/dimension mismatch or corruption)"
+                        elif not success:
+                            error_msg = "FFmpeg encoding failed (check source file integrity)"
+                        else:
+                            error_msg = "Encoding produced no output file"
                         self.logger.error(f"{local_input.name}: {error_msg}")
                         queued_file.error = error_msg
                         self._update_file_state(queued_file, FileState.FAILED)
