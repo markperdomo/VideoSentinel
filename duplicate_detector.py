@@ -393,7 +393,11 @@ class DuplicateDetector:
                             video_info_map[video] = info
                         probed += 1
                         if probed % 10 == 0 or probed == total_to_probe:
-                            console.print(f"  Checking durations: {probed}/{total_to_probe} files\r", end="")
+                            # Use raw write + \r so the line overwrites in place
+                            # \033[K clears from cursor to end of line (avoids leftover chars)
+                            msg = f"  Checking durations: {probed}/{total_to_probe} files"
+                            console.file.write(f"\r{msg}\033[K")
+                            console.file.flush()
 
                     # Group videos by similar duration
                     duration_groups = []

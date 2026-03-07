@@ -475,7 +475,9 @@ class VideoEncoder:
                         rich_progress = progress
                         task = file_task
                         # Reset the file task for this file
-                        fname = fit_filename(input_path.name)
+                        # Strip temp prefix so display shows the real filename
+                        display_name = input_path.name.removeprefix("download_")
+                        fname = fit_filename(display_name)
                         if total_seconds > 0:
                             rich_progress.update(task, description=f"  {fname}", completed=0, total=1000, speed="", eta="")
                         else:

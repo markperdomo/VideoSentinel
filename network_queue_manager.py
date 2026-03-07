@@ -354,7 +354,7 @@ class NetworkQueueManager:
                     if self._progress and self._enc_task is not None:
                         self._progress.update(
                             self._enc_task,
-                            description=f"[dim]Encode:[/dim]   {fit_filename(local_input.name)}",
+                            description=f"[dim]Encode:[/dim]   {fit_filename(local_input.name.removeprefix('download_'))}",
                             speed="", eta="",
                         )
 

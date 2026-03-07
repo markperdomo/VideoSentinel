@@ -64,15 +64,27 @@ def info(message: str):
     console.print(f"[info]\u2139[/info] {message}")
 
 
-def fit_filename(name: str, width: int = 40) -> str:
-    """Pad or truncate a filename to exactly *width* characters.
+def fit_filename(name: str, width: int = 0) -> str:
+    """Truncate a filename to at most *width* characters.
 
-    Short names are right-padded with spaces.  Long names keep the first
-    and last portions with an ellipsis in the middle so the extension
-    stays visible (e.g. ``very_long_na…encoded.mp4``).
+    Long names keep the first and last portions with an ellipsis in the
+    middle so the extension stays visible (e.g. ``very_long_na…encoded.mp4``).
+
+    If *width* is 0 (default), a sensible value is calculated from the
+    current terminal width, leaving room for progress-bar columns.
     """
+    if width <= 0:
+        # Fixed columns in queue/encoding progress:
+        #   spinner(2) + bar(20) + task%(4) + speed(8) + eta(14) + separators(6) = 54
+        # Leave the rest for the description column.  The description
+        # includes a prefix ("Download: " ≈ 12 chars) so subtract that too.
+        try:
+            term_width = os.get_terminal_size().columns
+        except OSError:
+            term_width = 80
+        width = max(20, term_width - 54 - 12)
     if len(name) <= width:
-        return name.ljust(width)
+        return name
     # Keep extension visible: split into stem + tail
     keep_end = min(12, width // 3)
     keep_start = width - keep_end - 1  # 1 char for ellipsis
@@ -148,7 +160,7 @@ def create_encoding_progress() -> Progress:
             "[progress.description]{task.description}",
             table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
         ),
-        BarColumn(bar_width=30),
+        BarColumn(bar_width=20),
         TaskProgressColumn(),
         TextColumn("{task.fields[speed]}", table_column=Column(width=8)),
         TextColumn("{task.fields[eta]}", table_column=Column(width=14)),
@@ -183,7 +195,7 @@ def create_queue_progress() -> Progress:
             "[progress.description]{task.description}",
             table_column=Column(ratio=1, no_wrap=True, overflow="ellipsis"),
         ),
-        BarColumn(bar_width=30),
+        BarColumn(bar_width=20),
         TaskProgressColumn(),
         TextColumn("{task.fields[speed]}", table_column=Column(width=8)),
         TextColumn("{task.fields[eta]}", table_column=Column(width=14)),
