@@ -1254,7 +1254,8 @@ def main():
                             console.print()
                             console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
                             console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
-                            console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
+                            compaction_pct = (incremental_space_saved / total_size_freed * 100) if total_size_freed > 0 else 0
+                            console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB ({compaction_pct:.1f}% compaction)")
                         else:
                             console.print(f"[warning]\u2192 Deletion cancelled[/warning]")
                     else:
@@ -1288,7 +1289,8 @@ def main():
                         console.print()
                         console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
                         console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
-                        console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB")
+                        compaction_pct = (incremental_space_saved / total_size_freed * 100) if total_size_freed > 0 else 0
+                        console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB ({compaction_pct:.1f}% compaction)")
                     console.print()
 
                     # Clean up filenames of kept files (remove _reencoded and _quicklook suffixes)
