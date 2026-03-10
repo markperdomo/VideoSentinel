@@ -2,11 +2,16 @@
 Video encoding module for re-encoding videos to modern specifications
 """
 
+import os
 import subprocess
 import json
 import re
 import sys
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from queue import Queue
 from typing import Optional, Dict
 from video_analyzer import VideoInfo
 from shutdown_manager import shutdown_requested
@@ -38,10 +43,12 @@ class VideoEncoder:
         'veryslow': 'veryslow'
     }
 
-    def __init__(self, verbose: bool = False, recovery_mode: bool = False, downscale_1080p: bool = False):
+    def __init__(self, verbose: bool = False, recovery_mode: bool = False,
+                 downscale_1080p: bool = False, parallel: int = 1):
         self.verbose = verbose
         self.recovery_mode = recovery_mode
         self.downscale_1080p = downscale_1080p
+        self.parallel = parallel
 
     def _parse_time_to_seconds(self, time_str: str) -> float:
         """
@@ -420,17 +427,38 @@ class VideoEncoder:
                     ])
                     if self.verbose:
                         console.print(f"  Large file ({file_size_gb:.1f}GB) - memory-safe x265 params (2 frame-threads, bframes=3, ref=2)", style="dim")
+                elif self.parallel > 1:
+                    # Parallel mode: constrain threads per instance to share CPU
+                    cpu_count = os.cpu_count() or 4
+                    pools = max(2, cpu_count // self.parallel)
+                    frame_threads = max(1, pools // 2)
+                    x265_params.extend([
+                        f'pools={pools}',
+                        f'frame-threads={frame_threads}',
+                    ])
+                    if self.verbose:
+                        console.print(
+                            f"  Parallel mode ({self.parallel} instances) - "
+                            f"x265 pools={pools}, frame-threads={frame_threads}",
+                            style="dim"
+                        )
                 cmd.extend(['-x265-params', ':'.join(x265_params)])
             elif target_codec.lower() == 'h264':
                 # Add H.264-specific parameters for maximum compatibility
                 cmd.extend(['-pix_fmt', 'yuv420p'])
                 # Add movflags for better QuickLook compatibility
                 cmd.extend(['-movflags', 'faststart'])
+                if self.parallel > 1:
+                    cpu_count = os.cpu_count() or 4
+                    cmd.extend(['-threads', str(max(2, cpu_count // self.parallel))])
             elif target_codec.lower() == 'av1':
                 # Add AV1-specific parameters
                 cmd.extend(['-cpu-used', '4'])  # Balance between speed and quality
                 # Add movflags for better QuickLook compatibility
                 cmd.extend(['-movflags', 'faststart'])
+                if self.parallel > 1:
+                    cpu_count = os.cpu_count() or 4
+                    cmd.extend(['-threads', str(max(2, cpu_count // self.parallel))])
 
             # Add final flags
             cmd.extend([
@@ -793,12 +821,250 @@ class VideoEncoder:
             filename = input_path.stem + suffix + extension
             return input_path.parent / filename
 
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format bytes to human-readable size."""
+        if size_bytes <= 0:
+            return "--"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.0f} KB"
+        if size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        return f"{size_bytes / (1024 ** 3):.2f} GB"
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        """Format seconds to human-readable duration."""
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        mins, secs = divmod(int(seconds), 60)
+        hours, mins = divmod(mins, 60)
+        if hours > 0:
+            return f"{hours}h {mins}m"
+        return f"{mins}m {secs}s"
+
+    def _print_session_summary(self, stats: list[dict], batch_elapsed: float):
+        """Print a rich summary table after batch encoding."""
+        from rich.table import Table
+
+        if not stats:
+            return
+
+        encoded = [s for s in stats if s['success'] and not s['skipped']]
+        skipped = [s for s in stats if s['success'] and s['skipped']]
+        failed = [s for s in stats if not s['success']]
+
+        if not encoded and not failed:
+            section_header("SESSION SUMMARY", f"All {len(skipped)} files already encoded")
+            return
+
+        section_header("ENCODING SESSION SUMMARY")
+
+        # Build per-file table
+        table = Table(show_header=True, header_style="bold cyan", show_edge=False, pad_edge=False)
+        table.add_column("File", ratio=1, no_wrap=True, overflow="ellipsis")
+        table.add_column("Original", justify="right", width=10)
+        table.add_column("Output", justify="right", width=10)
+        table.add_column("Saved", justify="right", width=8)
+        table.add_column("Time", justify="right", width=10)
+
+        for s in stats:
+            name = fit_filename(s['name'], width=50)
+            orig = self._format_size(s['input_size'])
+
+            if not s['success']:
+                table.add_row(name, orig, "[error]FAIL[/error]", "--", self._format_duration(s['elapsed']))
+            elif s['skipped']:
+                out = self._format_size(s['output_size'])
+                table.add_row(
+                    f"[dim]{name}[/dim]", f"[dim]{orig}[/dim]",
+                    f"[dim]{out}[/dim]", "[dim]skip[/dim]", "[dim]--[/dim]"
+                )
+            else:
+                out = self._format_size(s['output_size'])
+                if s['input_size'] > 0 and s['output_size'] > 0:
+                    pct = (1 - s['output_size'] / s['input_size']) * 100
+                    if pct >= 0:
+                        saved_str = f"[success]{pct:.0f}%[/success]"
+                    else:
+                        saved_str = f"[warning]+{abs(pct):.0f}%[/warning]"
+                else:
+                    saved_str = "--"
+                table.add_row(name, orig, out, saved_str, self._format_duration(s['elapsed']))
+
+        console.print(table)
+        console.print()
+
+        # Summary line
+        parts = []
+        if encoded:
+            total_input = sum(s['input_size'] for s in encoded)
+            total_output = sum(s['output_size'] for s in encoded)
+            total_saved = total_input - total_output
+            if total_input > 0:
+                pct_saved = (total_saved / total_input) * 100
+                parts.append(f"[success]{len(encoded)} encoded[/success]")
+                parts.append(f"[success]{self._format_size(total_saved)} saved ({pct_saved:.0f}%)[/success]")
+            else:
+                parts.append(f"[success]{len(encoded)} encoded[/success]")
+        if skipped:
+            parts.append(f"[dim]{len(skipped)} skipped[/dim]")
+        if failed:
+            parts.append(f"[error]{len(failed)} failed[/error]")
+        console.print(f"  {'  |  '.join(parts)}")
+        console.print(f"  Total time: {self._format_duration(batch_elapsed)}")
+
+    def _batch_re_encode_parallel(
+        self,
+        video_paths: list[Path],
+        output_dir: Optional[Path],
+        target_codec: str,
+        video_infos: Optional[Dict[Path, VideoInfo]],
+        parallel: int,
+        **kwargs
+    ) -> tuple[Dict[Path, bool], list[dict], float]:
+        """
+        Parallel batch encoding using ThreadPoolExecutor.
+
+        Returns:
+            Tuple of (results dict, encoding_stats list, batch_elapsed seconds)
+        """
+        results = {}
+        encoding_stats = []
+        stats_lock = threading.Lock()
+        total = len(video_paths)
+        replace_original = kwargs.get('replace_original', False)
+        batch_start = time.monotonic()
+
+        # Slot pool: N slots for N progress bar rows
+        slot_queue = Queue()
+        for i in range(parallel):
+            slot_queue.put(i)
+
+        completed_count = 0
+        completed_lock = threading.Lock()
+
+        try:
+            with create_encoding_progress() as batch_progress:
+                overall_task = batch_progress.add_task(
+                    f"Encoding batch ({parallel} parallel)",
+                    total=total, speed="", eta=""
+                )
+                file_tasks = []
+                for i in range(parallel):
+                    task_id = batch_progress.add_task(
+                        f"  [dim]idle[/dim]",
+                        total=None, speed="", eta=""
+                    )
+                    file_tasks.append(task_id)
+
+                def encode_worker(idx_and_path):
+                    nonlocal completed_count
+                    idx, video_path = idx_and_path
+
+                    if shutdown_requested():
+                        return (video_path, False, None)
+
+                    # Claim a display slot
+                    slot = slot_queue.get()
+                    file_task = file_tasks[slot]
+
+                    output_path = self.get_output_path(
+                        video_path, output_dir, target_codec=target_codec
+                    )
+                    video_info = video_infos.get(video_path) if video_infos else None
+
+                    input_size = video_path.stat().st_size if video_path.exists() else 0
+                    output_existed_before = output_path.exists()
+                    file_start = time.monotonic()
+
+                    try:
+                        result = self.re_encode_video(
+                            video_path,
+                            output_path,
+                            target_codec=target_codec,
+                            video_info=video_info,
+                            current_index=idx,
+                            total_count=total,
+                            progress=batch_progress,
+                            file_task=file_task,
+                            **kwargs
+                        )
+                    except Exception as e:
+                        console.print(f"[error]Error encoding {video_path.name}: {e}[/error]")
+                        result = False
+
+                    file_elapsed = time.monotonic() - file_start
+
+                    # Determine output file size
+                    output_size = 0
+                    if result:
+                        if output_path.exists():
+                            output_size = output_path.stat().st_size
+                        elif replace_original:
+                            ext = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+                            final_path = video_path.parent / (video_path.stem + ext)
+                            if final_path.exists():
+                                output_size = final_path.stat().st_size
+
+                    skipped = result and output_existed_before and file_elapsed < 3
+
+                    stat = {
+                        'name': video_path.name,
+                        'input_size': input_size,
+                        'output_size': output_size,
+                        'success': result,
+                        'skipped': skipped,
+                        'elapsed': file_elapsed,
+                    }
+
+                    # Release display slot
+                    batch_progress.update(
+                        file_task, description=f"  [dim]idle[/dim]",
+                        completed=0, total=None, speed="", eta=""
+                    )
+                    slot_queue.put(slot)
+
+                    # Update overall progress
+                    with completed_lock:
+                        completed_count += 1
+                        batch_progress.update(
+                            overall_task, completed=completed_count, speed="", eta=""
+                        )
+
+                    return (video_path, result, stat)
+
+                # Submit all files to the thread pool
+                with ThreadPoolExecutor(max_workers=parallel) as executor:
+                    futures = []
+                    for idx, video_path in enumerate(video_paths, start=1):
+                        futures.append(
+                            executor.submit(encode_worker, (idx, video_path))
+                        )
+
+                    for future in as_completed(futures):
+                        try:
+                            video_path, result, stat = future.result()
+                            results[video_path] = result
+                            if stat is not None:
+                                with stats_lock:
+                                    encoding_stats.append(stat)
+                        except Exception as e:
+                            console.print(f"[error]Unexpected error: {e}[/error]")
+
+        except KeyboardInterrupt:
+            console.print("\n[warning]Interrupted by user.[/warning]")
+
+        batch_elapsed = time.monotonic() - batch_start
+        return results, encoding_stats, batch_elapsed
+
     def batch_re_encode(
         self,
         video_paths: list[Path],
         output_dir: Optional[Path] = None,
         target_codec: str = 'hevc',
         video_infos: Optional[Dict[Path, VideoInfo]] = None,
+        parallel: int = 1,
         **kwargs
     ) -> Dict[Path, bool]:
         """
@@ -815,9 +1081,23 @@ class VideoEncoder:
         Returns:
             Dictionary mapping input paths to success status
         """
+        effective_parallel = max(1, parallel if parallel > 1 else self.parallel)
+
+        if effective_parallel > 1:
+            results, encoding_stats, batch_elapsed = self._batch_re_encode_parallel(
+                video_paths, output_dir, target_codec, video_infos,
+                effective_parallel, **kwargs
+            )
+            self._print_session_summary(encoding_stats, batch_elapsed)
+            return results
+
+        # Sequential path (default)
         results = {}
         failed_files = []
+        encoding_stats = []
         total = len(video_paths)
+        replace_original = kwargs.get('replace_original', False)
+        batch_start = time.monotonic()
 
         try:
             with create_encoding_progress() as batch_progress:
@@ -832,6 +1112,11 @@ class VideoEncoder:
                     output_path = self.get_output_path(video_path, output_dir, target_codec=target_codec)
                     video_info = video_infos.get(video_path) if video_infos else None
 
+                    # Track stats for session summary
+                    input_size = video_path.stat().st_size if video_path.exists() else 0
+                    output_existed_before = output_path.exists()
+                    file_start = time.monotonic()
+
                     result = self.re_encode_video(
                         video_path,
                         output_path,
@@ -844,6 +1129,31 @@ class VideoEncoder:
                         **kwargs
                     )
 
+                    file_elapsed = time.monotonic() - file_start
+
+                    # Determine output file size
+                    output_size = 0
+                    if result:
+                        if output_path.exists():
+                            output_size = output_path.stat().st_size
+                        elif replace_original:
+                            ext = self.EXTENSION_MAP.get(target_codec.lower(), '.mp4')
+                            final_path = video_path.parent / (video_path.stem + ext)
+                            if final_path.exists():
+                                output_size = final_path.stat().st_size
+
+                    # Detect skipped files (valid output already existed)
+                    skipped = result and output_existed_before and file_elapsed < 3
+
+                    encoding_stats.append({
+                        'name': video_path.name,
+                        'input_size': input_size,
+                        'output_size': output_size,
+                        'success': result,
+                        'skipped': skipped,
+                        'elapsed': file_elapsed,
+                    })
+
                     results[video_path] = result
                     if not result:
                         failed_files.append(video_path)
@@ -852,13 +1162,10 @@ class VideoEncoder:
         except KeyboardInterrupt:
             console.print("\n[warning]Interrupted by user.[/warning]")
 
-        # Print summary after progress bar is gone
-        successful = sum(1 for v in results.values() if v)
-        section_header(f"Re-encoding complete: {successful}/{total} successful")
-        if failed_files:
-            console.print("[error]Failed files:[/error]")
-            for f in failed_files:
-                console.print(f"  [error]\u2717[/error] {f.name}")
+        batch_elapsed = time.monotonic() - batch_start
+
+        # Print session summary with space savings
+        self._print_session_summary(encoding_stats, batch_elapsed)
 
         return results
 

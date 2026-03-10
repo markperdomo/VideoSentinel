@@ -50,6 +50,8 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Re-encodes videos to modern codecs (H.264, HEVC, AV1) using `ffmpeg`
 - Implements **smart quality matching**: calculates optimal CRF based on source bits-per-pixel (bpp)
 - Quality tiers: high bpp sources get lower CRF (better quality), low bpp sources get higher CRF
+- **Parallel encoding**: `--parallel N` encodes N files simultaneously with per-instance x265 thread constraints
+- **Session summary**: Rich table showing per-file original/output sizes, compression %, timing, and aggregated space savings
 - Validates output before considering encoding successful (checks file size, dimensions, duration)
 - Automatically cleans up invalid outputs; preserves originals by default
 - Resume-safe: validates existing outputs and skips re-encoding if valid
@@ -64,7 +66,7 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 **network_queue_manager.py** (Network Storage Optimization)
 - Three-stage pipeline for encoding files on network storage: Download → Encode → Upload
 - Download thread pre-fetches files from network to local temp storage
-- Encode thread processes files locally at full SSD speed (main thread)
+- Encode workers process files locally at full SSD speed (N parallel workers with `--parallel N`)
 - Upload thread copies completed files back to network in background
 - All three stages run in parallel for 2-3x performance improvement
 - Smart buffering with configurable buffer size (default: 4 files)
@@ -202,6 +204,24 @@ During video encoding, the encoder displays live visual progress with queue posi
 - ETA calculated from remaining duration and current speed (e.g., "2m 15s", "1h 5m")
 - Automatically falls back to time-based display if video duration unavailable
 
+**Parallel File Encoding** (`--parallel N` / `-j N`)
+Maximizes CPU utilization on high-core-count CPUs where a single x265 instance can't use all cores:
+1. Launches N `ThreadPoolExecutor` workers (threads, not processes — CPU work is in ffmpeg subprocesses)
+2. Constrains per-instance x265 threads: `pools = max(2, cpu_count // N)`, `frame-threads = max(1, pools // 2)`
+3. Also constrains H.264 (`-threads`) and AV1 (`-threads`) when parallel > 1
+4. Slot pool pattern: a `Queue` holds N slot indices, each worker claims a slot for its progress row
+5. Progress display shows N file-task rows under the overall progress bar
+6. Works in both batch mode (`batch_re_encode`) and queue mode (`NetworkQueueManager`)
+7. Queue mode: N encode worker threads share a `_encode_completed_count` counter with lock
+8. `parallel=1` (default) runs the existing sequential code path — zero regression risk
+
+**Encoding Session Summary**
+After batch encoding completes, displays a Rich table with:
+1. Per-file rows: original size, output size, compression %, encoding time
+2. Summary row: total input/output sizes, overall compression %, total time
+3. Space saved calculation: total bytes freed across all files
+4. Skipped files shown as "Skipped" in the output column
+
 **Graceful Shutdown Manager** (shutdown_manager.py)
 Provides thread-safe graceful shutdown during batch encoding operations:
 1. Background thread monitors for 'q' key press using platform-specific input methods
@@ -330,6 +350,11 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - Input flags: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
   - Output flags: `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
 - `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
+- `--parallel N`, `-j N`: Encode N files simultaneously (default: 1)
+  - Constrains per-instance x265 threads so N instances share the CPU effectively
+  - Thread allocation: `pools = max(2, cpu_count // N)`, `frame-threads = max(1, pools // 2)`
+  - Works with both batch mode and `--queue-mode`
+  - Uses ThreadPoolExecutor (CPU work is in ffmpeg subprocesses, no GIL issue)
 - `--output-dir PATH`: Custom directory for re-encoded videos (default: same as source with `_reencoded` suffix)
 
 **Duplicate Management**

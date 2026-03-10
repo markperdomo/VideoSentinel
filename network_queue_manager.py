@@ -78,7 +78,8 @@ class NetworkQueueManager:
         max_buffer_size: int = 4,
         max_temp_size_gb: Optional[float] = None,
         verbose: bool = False,
-        replace_original: bool = False
+        replace_original: bool = False,
+        parallel: int = 1
     ):
         """
         Initialize the queue manager.
@@ -97,6 +98,11 @@ class NetworkQueueManager:
         self.max_temp_size_bytes = int(max_temp_size_gb * 1024**3) if max_temp_size_gb else None
         self.verbose = verbose
         self.replace_original = replace_original
+        self.parallel = max(1, parallel)
+
+        # Shared encode progress counter (thread-safe for parallel encoding)
+        self._encode_completed_count = 0
+        self._encode_completed_lock = threading.Lock()
 
         # Queues for thread coordination
         self.download_queue: queue.Queue[QueuedFile] = queue.Queue()
@@ -162,7 +168,13 @@ class NetworkQueueManager:
         # Clear the encoding complete flag (important for resumed sessions)
         self.encoding_complete.clear()
 
+        # Reset shared counter for this session
+        self._encode_completed_count = 0
+
         total = len(self.files)
+        # Count already-completed files from resumed sessions
+        with self.files_lock:
+            self._encode_completed_count = sum(1 for f in self.files if f.state == FileState.COMPLETE)
 
         with create_queue_progress() as progress:
             self._progress = progress
@@ -172,9 +184,17 @@ class NetworkQueueManager:
             self._dl_task = progress.add_task(
                 "[dim]Download:[/dim] idle", total=None, speed="", eta=""
             )
-            self._enc_task = progress.add_task(
-                "[dim]Encode:[/dim]   idle", total=None, speed="", eta=""
-            )
+
+            # Create encode task row(s) — one per parallel worker
+            self._enc_tasks = []
+            for i in range(self.parallel):
+                task = progress.add_task(
+                    "[dim]Encode:[/dim]   idle", total=None, speed="", eta=""
+                )
+                self._enc_tasks.append(task)
+            # Keep self._enc_task pointing to the first for backward compat
+            self._enc_task = self._enc_tasks[0]
+
             self._ul_task = progress.add_task(
                 "[dim]Upload:[/dim]   idle", total=None, speed="", eta=""
             )
@@ -186,14 +206,27 @@ class NetworkQueueManager:
             self.download_thread.start()
             self.upload_thread.start()
 
-            # Main thread handles encoding (CPU-bound, no benefit to threading)
-            self._encode_worker()
+            if self.parallel <= 1:
+                # Main thread handles encoding (existing behavior)
+                self._encode_worker(self._enc_tasks[0])
+            else:
+                # Launch N parallel encode worker threads
+                encode_threads = []
+                for enc_task in self._enc_tasks:
+                    t = threading.Thread(
+                        target=self._encode_worker, args=(enc_task,), daemon=True
+                    )
+                    t.start()
+                    encode_threads.append(t)
+                for t in encode_threads:
+                    t.join()
 
             # Signal that encoding is complete (no more uploads coming)
             self.encoding_complete.set()
 
-            # Update encoding row to show done
-            progress.update(self._enc_task, description="[dim]Encode:[/dim]   [success]done[/success]", speed="", eta="")
+            # Update encoding rows to show done
+            for enc_task in self._enc_tasks:
+                progress.update(enc_task, description="[dim]Encode:[/dim]   [success]done[/success]", speed="", eta="")
 
             # Wait for all uploads to complete before exiting
             if self.verbose:
@@ -306,14 +339,14 @@ class NetworkQueueManager:
                 description="[dim]Download:[/dim] [success]done[/success]",
             )
 
-    def _encode_worker(self) -> None:
-        """Main thread worker: Encodes files locally"""
-        completed_count = 0
-        total = len(self.files)
+    def _encode_worker(self, enc_task=None) -> None:
+        """
+        Encode worker: processes files from the encode queue.
 
-        # Count already-completed files from resumed sessions
-        with self.files_lock:
-            completed_count = sum(1 for f in self.files if f.state == FileState.COMPLETE)
+        When parallel > 1, multiple instances run on separate threads,
+        each with its own enc_task for independent progress display.
+        """
+        total = len(self.files)
 
         while not self.stop_event.is_set():
             try:
@@ -350,10 +383,10 @@ class NetworkQueueManager:
                     if self.verbose:
                         self.logger.info(f"Encoding: {local_input.name}")
 
-                    # Update encoding row
-                    if self._progress and self._enc_task is not None:
+                    # Update encoding row for this worker's task
+                    if self._progress and enc_task is not None:
                         self._progress.update(
-                            self._enc_task,
+                            enc_task,
                             description=f"[dim]Encode:[/dim]   {fit_filename(local_input.name.removeprefix('download_'))}",
                             speed="", eta="",
                         )
@@ -362,7 +395,7 @@ class NetworkQueueManager:
                     try:
                         success = self.encode_callback(
                             local_input, local_output,
-                            self._progress, self._enc_task,
+                            self._progress, enc_task,
                         )
                     except TypeError:
                         # Fallback for callbacks that don't accept progress args
@@ -389,8 +422,6 @@ class NetworkQueueManager:
 
                         # Clean up local input (no longer needed)
                         local_input.unlink()
-
-                        completed_count += 1
                     else:
                         # Build a descriptive error message
                         if not success and local_output.exists():
@@ -407,9 +438,10 @@ class NetworkQueueManager:
                         if local_input.exists():
                             local_input.unlink()
 
-                        completed_count += 1  # Still count toward overall progress
-
-                    # Update overall progress
+                    # Update overall progress (thread-safe)
+                    with self._encode_completed_lock:
+                        self._encode_completed_count += 1
+                        completed_count = self._encode_completed_count
                     if self._progress and self._overall_task is not None:
                         self._progress.update(
                             self._overall_task,
@@ -428,7 +460,9 @@ class NetworkQueueManager:
                     if Path(queued_file.local_path).exists():
                         Path(queued_file.local_path).unlink()
 
-                    completed_count += 1
+                    with self._encode_completed_lock:
+                        self._encode_completed_count += 1
+                        completed_count = self._encode_completed_count
                     if self._progress and self._overall_task is not None:
                         self._progress.update(
                             self._overall_task,
@@ -440,6 +474,14 @@ class NetworkQueueManager:
                 finally:
                     self.encode_queue.task_done()
                     self.save_state()
+
+                # Reset task display when idle
+                if self._progress and enc_task is not None:
+                    self._progress.update(
+                        enc_task,
+                        description="[dim]Encode:[/dim]   idle",
+                        completed=0, total=None, speed="", eta=""
+                    )
 
             except Exception as e:
                 self.logger.error(f"Encode worker error: {e}")

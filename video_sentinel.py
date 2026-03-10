@@ -383,6 +383,14 @@ def main():
     )
 
     parser.add_argument(
+        '--parallel', '-j',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Encode N files simultaneously (default: 1). Constrains per-instance x265 threads to share CPU effectively.'
+    )
+
+    parser.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output'
@@ -421,6 +429,11 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Validate --parallel flag
+    if args.parallel < 1:
+        console.print("[error]Error: --parallel must be at least 1[/error]", highlight=False)
+        sys.exit(1)
 
     # Handle --clear-queue flag (can be used standalone)
     if args.clear_queue:
@@ -512,7 +525,8 @@ def main():
 
 
     # Check ffmpeg availability
-    encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover, downscale_1080p=args.downscale_1080p)
+    encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover,
+                           downscale_1080p=args.downscale_1080p, parallel=args.parallel)
     if not encoder.check_ffmpeg_available():
         console.print("[error]Error: ffmpeg is not installed or not in PATH[/error]", highlight=False)
         console.print("[error]Please install ffmpeg to use VideoSentinel[/error]", highlight=False)
@@ -638,7 +652,8 @@ def main():
                 max_buffer_size=args.buffer_size,
                 max_temp_size_gb=args.max_temp_size,
                 verbose=args.verbose,
-                replace_original=args.replace_original
+                replace_original=args.replace_original,
+                parallel=args.parallel
             )
             if queue_manager.load_state():
                 console.print("Resumed from previous session\n")
@@ -822,7 +837,8 @@ def main():
                         max_buffer_size=args.buffer_size,
                         max_temp_size_gb=args.max_temp_size,
                         verbose=args.verbose,
-                        replace_original=args.replace_original
+                        replace_original=args.replace_original,
+                        parallel=args.parallel
                     )
 
                     # Try to resume from previous state
@@ -906,7 +922,8 @@ def main():
                             output_dir=args.output_dir,
                             target_codec=args.target_codec,
                             video_infos=video_infos_dict,
-                            replace_original=args.replace_original
+                            replace_original=args.replace_original,
+                            parallel=args.parallel
                         )
                     except KeyboardInterrupt:
                         section_header("INTERRUPTED", "Stopping after current video")
@@ -1017,7 +1034,8 @@ def main():
                     max_buffer_size=args.buffer_size,
                     max_temp_size_gb=args.max_temp_size,
                     verbose=args.verbose,
-                    replace_original=args.replace_original
+                    replace_original=args.replace_original,
+                    parallel=args.parallel
                 )
 
                 # Try to resume from previous state
