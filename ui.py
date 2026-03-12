@@ -31,7 +31,7 @@ VS_THEME = Theme({
 })
 
 # Global console instance -- all modules import this
-console = Console(theme=VS_THEME)
+console = Console(theme=VS_THEME, highlight=False)
 
 
 def section_header(title: str, subtitle: str = None):

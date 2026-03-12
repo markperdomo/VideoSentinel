@@ -165,7 +165,7 @@ def handle_duplicate_group(
         compat = analyzer.check_quicklook_compatibility(best_video)
         ql_status = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
-        console.print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
+        console.print(f"    ({info.codec.upper()}, [info]{info.width}x{info.height}[/info], [info]{info.bitrate//1000}[/info] kbps{ql_status})")
 
         for video in to_delete:
             info = video_infos[video]
@@ -175,8 +175,8 @@ def handle_duplicate_group(
             compat = analyzer.check_quicklook_compatibility(video)
             ql_status = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
-            console.print(f"  [error]\u2717 Deleting:[/error] {video.name} ({file_size_mb:.2f} MB)")
-            console.print(f"    ({info.codec.upper()}, {info.width}x{info.height}, {info.bitrate//1000} kbps{ql_status})")
+            console.print(f"  [error]\u2717 Deleting:[/error] {video.name} ([info]{file_size_mb:.2f}[/info] MB)")
+            console.print(f"    ({info.codec.upper()}, [info]{info.width}x{info.height}[/info], [info]{info.bitrate//1000}[/info] kbps{ql_status})")
 
     elif action == 'interactive':
         # Show options and let user choose
@@ -194,8 +194,8 @@ def handle_duplicate_group(
             ql_badge = " [QuickLook \u2713]" if compat.get('compatible') else ""
 
             console.print(f"  {quality_rank} [{idx}] {video.name}{ql_badge}")
-            console.print(f"      Codec: {info.codec.upper()}, Resolution: {info.width}x{info.height}")
-            console.print(f"      Bitrate: {info.bitrate//1000} kbps, Size: {file_size_mb:.2f} MB")
+            console.print(f"      Codec: {info.codec.upper()}, Resolution: [info]{info.width}x{info.height}[/info]")
+            console.print(f"      Bitrate: [info]{info.bitrate//1000}[/info] kbps, Size: [info]{file_size_mb:.2f}[/info] MB")
             console.print()
 
         console.print(f"Options:")
@@ -215,7 +215,7 @@ def handle_duplicate_group(
             console.print(f"  [success]\u2713 Keeping:[/success] {keep_video.name}")
             for video in to_delete:
                 file_size_mb = video.stat().st_size / (1024 * 1024)
-                console.print(f"  [error]\u2717 Will delete:[/error] {video.name} ({file_size_mb:.2f} MB)")
+                console.print(f"  [error]\u2717 Will delete:[/error] {video.name} ([info]{file_size_mb:.2f}[/info] MB)")
         else:
             console.print(f"  [warning]\u2192 No action, keeping all[/warning]")
 
@@ -457,7 +457,7 @@ def main():
         temp_files = list(temp_dir.glob("*"))
         if temp_files:
             total_size = sum(f.stat().st_size for f in temp_files if f.is_file())
-            console.print(f"Removing {len(temp_files)} temp files ({total_size / (1024**2):.2f} MB)")
+            console.print(f"Removing {len(temp_files)} temp files ([info]{total_size / (1024**2):.2f}[/info] MB)")
             queue_manager.cleanup()
             console.print("[success]\u2713 Queue cleared successfully[/success]")
         else:
@@ -759,7 +759,7 @@ def main():
                 codec_lower = video_info.codec.lower()
                 codec_ok = codec_lower in analyzer.MODERN_CODECS
                 codec_str = f"[success]{video_info.codec.upper()}[/success]" if codec_ok else f"[error]{video_info.codec.upper()}[/error]"
-                console.print(f"  [error]\u2717[/error] {video_path.name}  {codec_str}  {video_info.width}x{video_info.height}  {video_info.container}")
+                console.print(f"  [error]\u2717[/error] {video_path.name}  {codec_str}  [info]{video_info.width}x{video_info.height}[/info]  {video_info.container}")
 
         if failed_analyses:
             console.print()
@@ -1214,7 +1214,7 @@ def main():
                     console.print(f"{group_name} ({len(videos)} videos):")
                     for video in videos:
                         file_size_mb = video.stat().st_size / (1024 * 1024)
-                        console.print(f"  - {video.name} ({file_size_mb:.2f} MB)")
+                        console.print(f"  - {video.name} ([info]{file_size_mb:.2f}[/info] MB)")
                     console.print()
             else:
                 # Handle each group with auto-best or interactive
@@ -1271,9 +1271,9 @@ def main():
 
                             console.print()
                             console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                            console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                            console.print(f"Total space freed: [info]{total_size_freed / (1024*1024):.2f}[/info] MB")
                             compaction_pct = (incremental_space_saved / total_size_freed * 100) if total_size_freed > 0 else 0
-                            console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB ({compaction_pct:.1f}% compaction)")
+                            console.print(f"Incremental space saved: [info]{incremental_space_saved / (1024*1024):.2f}[/info] MB ([info]{compaction_pct:.1f}%[/info] compaction)")
                         else:
                             console.print(f"[warning]\u2192 Deletion cancelled[/warning]")
                     else:
@@ -1306,9 +1306,9 @@ def main():
 
                         console.print()
                         console.print(f"Successfully deleted {deleted_count}/{len(all_to_delete)} files")
-                        console.print(f"Total space freed: {total_size_freed / (1024*1024):.2f} MB")
+                        console.print(f"Total space freed: [info]{total_size_freed / (1024*1024):.2f}[/info] MB")
                         compaction_pct = (incremental_space_saved / total_size_freed * 100) if total_size_freed > 0 else 0
-                        console.print(f"Incremental space saved: {incremental_space_saved / (1024*1024):.2f} MB ({compaction_pct:.1f}% compaction)")
+                        console.print(f"Incremental space saved: [info]{incremental_space_saved / (1024*1024):.2f}[/info] MB ([info]{compaction_pct:.1f}%[/info] compaction)")
                     console.print()
 
                     # Clean up filenames of kept files (remove _reencoded and _quicklook suffixes)
