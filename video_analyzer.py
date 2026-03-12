@@ -566,11 +566,11 @@ class VideoAnalyzer:
         # Much faster than running a separate glob per extension (48+ passes).
         if recursive:
             for entry in directory.rglob('*'):
-                if entry.is_file() and entry.suffix.lower() in search_extensions:
+                if entry.is_file() and not entry.name.startswith('._') and entry.suffix.lower() in search_extensions:
                     video_files.append(entry)
         else:
             for entry in directory.iterdir():
-                if entry.is_file() and entry.suffix.lower() in search_extensions:
+                if entry.is_file() and not entry.name.startswith('._') and entry.suffix.lower() in search_extensions:
                     video_files.append(entry)
 
         return sorted(video_files)
