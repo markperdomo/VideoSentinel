@@ -222,5 +222,5 @@ docs/_build/
 docs/site/
 site/
 
-# Test files
-tests/
+# Test artifacts (but not the tests/ directory itself)
+tests/__pycache__/
