@@ -36,6 +36,8 @@ The core idea: you shouldn't need to manually audit thousands of video files to 
 ### Safety & Control
 - **Originals Preserved by Default**: Re-encoded files get a `_reencoded` suffix — originals are only deleted with explicit `--replace-original`
 - **Output Validation**: Every re-encoded file is validated (ffprobe readability, dimensions, duration match) before the original is touched
+- **Deferred Replacement in Queue Mode**: When using `--replace-original` with `--queue-mode`, originals are never deleted during upload. Instead, a separate confirmation phase runs after the pipeline completes — each uploaded file is re-validated via ffprobe (video stream, duration match) before the original is deleted
+- **Review Before Replace**: `--replace-after-review` encodes everything first, shows a summary table with per-file sizes and compression %, then prompts before deleting originals — giving you a chance to spot-check the results
 - **Batch Control**: Filter by file type (`--file-types wmv,avi`), limit batch size (`--max-files 10`), or target specific codecs (`--target-codec av1`)
 - **Real-time Progress**: Live encoding stats with visual progress bars, speed multiplier, and ETA
 - **Error Recovery Mode**: Salvage corrupted videos with FFmpeg error-tolerant decoding flags
@@ -115,8 +117,11 @@ python video_sentinel.py /path/to/videos -r --check-specs --re-encode --downscal
 # Encode 3 files at once to maximize CPU usage
 python video_sentinel.py /path/to/videos -r --check-specs --re-encode -j 3 --replace-original
 
-# Parallel encoding on network storage
+# Parallel encoding on network storage (auto-replace after validation)
 python video_sentinel.py /Volumes/NAS/videos -r --check-specs --re-encode -j 2 --queue-mode --replace-original
+
+# Same but review a summary table and confirm before deleting originals
+python video_sentinel.py /Volumes/NAS/videos -r --check-specs --re-encode -j 2 --queue-mode --replace-after-review
 
 # Recover corrupted videos
 python video_sentinel.py /path/to/broken -r --check-specs --re-encode --recover

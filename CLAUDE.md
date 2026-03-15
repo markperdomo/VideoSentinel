@@ -78,6 +78,16 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
   - Validates temp files still exist when resuming
   - Re-downloads if temp files missing
   - Shows detailed resume summary with file state breakdown
+- **Deferred Replacement** (`--replace-original` / `--replace-after-review`):
+  - Originals are never deleted during upload — files move to `UPLOADED` state
+  - Post-upload validation: size match between local encoded file and network copy
+  - Confirmation phase runs after entire pipeline completes:
+    1. ffprobe validates each uploaded file on the network (video stream, duration match ±2s)
+    2. Rich review table shows per-file sizes and compression %
+    3. Only then are originals deleted (one at a time, state saved after each for crash safety)
+  - `--replace-after-review`: interactive prompt before deleting originals
+  - `FileState.UPLOADED`: new state between UPLOADING and COMPLETE for deferred replacement
+  - `QueuedFile` tracks `source_size`, `output_size`, `source_duration` for reporting and validation
 
 **shutdown_manager.py** (Graceful Shutdown Control)
 - Provides thread-safe graceful shutdown mechanism during batch operations
@@ -184,6 +194,27 @@ If the process is interrupted, the encoder intelligently resumes:
 4. Shows "Resuming: video.mp4 (already encoded)" instead of wasting time re-encoding
 5. Never re-encodes files that are already successfully encoded
 6. Validates outputs before considering them complete to avoid using corrupted partial files
+
+**Deferred Replacement in Queue Mode** (`--replace-original` / `--replace-after-review`):
+In queue mode, replacement is handled differently — as a separate confirmation phase after the entire pipeline completes:
+
+1. **Pipeline phase**: Download → Encode → Upload runs normally. After uploading, the file is
+   validated (size match with local output) and moves to `UPLOADED` state — **originals are NOT deleted yet**
+2. **Review phase**: A Rich table displays all uploaded files with original/encoded sizes and compression %
+3. **Confirmation phase**: Each uploaded file is re-validated via ffprobe on the network (checks video stream exists
+   and duration matches source within ±2 seconds), then the original is deleted. State is saved after each deletion
+   for crash safety.
+
+Two modes:
+- `--replace-original`: Auto-confirms after showing the review table (no prompt)
+- `--replace-after-review`: Shows review table and prompts "Replace N originals, freeing X GB? [y/N]" — the user
+  can spot-check encoded files on the network before confirming. If declined, both versions remain and the user
+  can clean up later with `--filename-duplicates`.
+
+**Interrupt safety**: If interrupted at any point, resuming picks up exactly where it left off:
+- Files in `UPLOADED` state: skip pipeline, go straight to confirmation
+- Files in `COMPLETE` state: already done
+- Temp files missing: automatically re-downloaded from source
 
 **Real-Time Encoding Progress**
 During video encoding, the encoder displays live visual progress with queue position:
@@ -349,7 +380,13 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
   - Uses FFmpeg error-tolerant flags to salvage broken/corrupted videos
   - Input flags: `-err_detect ignore_err`, `-fflags +genpts+discardcorrupt+igndts`, `-ignore_unknown`
   - Output flags: `-max_muxing_queue_size 1024`, `-max_error_rate 1.0`
-- `--replace-original`: Replace original files with re-encoded versions (deletes source, renames output)
+- `--replace-original`: Replace original files with re-encoded versions (deletes source after validation)
+  - In queue mode: deferred replacement — originals deleted in a confirmation phase after all encoding/uploading completes
+  - Post-upload validation: size match + ffprobe duration check before deleting
+- `--replace-after-review`: Like `--replace-original` but prompts for confirmation before deleting originals
+  - Shows a Rich review table with per-file sizes and compression %
+  - User can spot-check encoded files on network before confirming
+  - If declined, both versions remain on network for manual cleanup
 - `--parallel N`, `-j N`: Encode N files simultaneously (default: 1)
   - Constrains per-instance x265 threads so N instances share the CPU effectively
   - Thread allocation: `pools = max(2, cpu_count // N)`, `frame-threads = max(1, pools // 2)`
