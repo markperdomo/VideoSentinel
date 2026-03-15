@@ -34,6 +34,7 @@ class FileState(Enum):
     LOCAL = "local"               # Downloaded, waiting to encode
     ENCODING = "encoding"         # Currently encoding
     UPLOADING = "uploading"       # Encoded, uploading to network
+    UPLOADED = "uploaded"         # Uploaded and validated, original not yet deleted
     COMPLETE = "complete"         # Fully processed and uploaded
     FAILED = "failed"            # Error occurred
 
@@ -47,6 +48,8 @@ class QueuedFile:
     final_path: Optional[str]     # Final network destination (None until uploaded)
     state: FileState
     error: Optional[str] = None
+    source_size: Optional[int] = None   # Original file size in bytes
+    output_size: Optional[int] = None   # Encoded file size in bytes
 
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization"""
@@ -174,7 +177,7 @@ class NetworkQueueManager:
         total = len(self.files)
         # Count already-completed files from resumed sessions
         with self.files_lock:
-            self._encode_completed_count = sum(1 for f in self.files if f.state == FileState.COMPLETE)
+            self._encode_completed_count = sum(1 for f in self.files if f.state in (FileState.COMPLETE, FileState.UPLOADED))
 
         with create_queue_progress() as progress:
             self._progress = progress
@@ -521,6 +524,15 @@ class NetworkQueueManager:
                     # Copy encoded file to network destination
                     final.parent.mkdir(parents=True, exist_ok=True)
 
+                    # Record file sizes for reporting
+                    source = Path(queued_file.source_path)
+                    try:
+                        queued_file.source_size = source.stat().st_size
+                    except OSError:
+                        pass  # Source may be on slow network, size is best-effort
+                    local_output_size = output.stat().st_size
+                    queued_file.output_size = local_output_size
+
                     # Try to preserve metadata, but fall back to regular copy if it fails
                     # (Network filesystems often don't support metadata preservation)
                     try:
@@ -530,19 +542,27 @@ class NetworkQueueManager:
                             self.logger.debug(f"Metadata preservation failed, using regular copy: {e}")
                         shutil.copy(output, final)
 
-                    # If replace_original mode, delete the source
-                    if self.replace_original:
-                        source = Path(queued_file.source_path)
-                        if source.exists() and source != final:
-                            source.unlink()
-                            if self.verbose:
-                                self.logger.info(f"Deleted original: {source.name}")
+                    # Post-upload validation: verify the uploaded file matches expected size
+                    if not final.exists():
+                        raise Exception(f"Upload verification failed: {final} does not exist after copy")
+                    uploaded_size = final.stat().st_size
+                    if uploaded_size != local_output_size:
+                        # Size mismatch - network copy may be corrupted/truncated
+                        raise Exception(
+                            f"Upload verification failed: size mismatch "
+                            f"(local={local_output_size}, uploaded={uploaded_size})"
+                        )
 
                     # Clean up local output
                     output.unlink()
 
-                    # Mark complete
-                    self._update_file_state(queued_file, FileState.COMPLETE)
+                    if self.replace_original:
+                        # Deferred replacement: mark as UPLOADED (originals deleted later
+                        # in confirm_replacements() after user can review)
+                        self._update_file_state(queued_file, FileState.UPLOADED)
+                    else:
+                        # No replacement needed, we're done
+                        self._update_file_state(queued_file, FileState.COMPLETE)
 
                     # Update upload status to show completion
                     if self._progress and self._ul_task is not None:
@@ -695,6 +715,10 @@ class NetworkQueueManager:
                         queued_file.state = FileState.PENDING
                         queued_file.local_path = None
                         self.download_queue.put(queued_file)
+                elif queued_file.state == FileState.UPLOADED:
+                    # Already uploaded and validated, waiting for confirmation
+                    # (originals not yet deleted — will be handled by confirm_replacements)
+                    resumed_count['complete'] += 1  # Count as done for pipeline purposes
                 elif queued_file.state in [FileState.UPLOADING]:
                     # Resume upload (if output exists)
                     if queued_file.output_path and Path(queued_file.output_path).exists():
@@ -751,9 +775,87 @@ class NetworkQueueManager:
                 'local': sum(1 for f in self.files if f.state == FileState.LOCAL),
                 'encoding': sum(1 for f in self.files if f.state == FileState.ENCODING),
                 'uploading': sum(1 for f in self.files if f.state == FileState.UPLOADING),
+                'uploaded': sum(1 for f in self.files if f.state == FileState.UPLOADED),
                 'complete': sum(1 for f in self.files if f.state == FileState.COMPLETE),
                 'failed': sum(1 for f in self.files if f.state == FileState.FAILED),
             }
+
+    def get_replacement_report(self) -> List[Dict]:
+        """
+        Get a report of all files ready for replacement (UPLOADED state).
+
+        Returns:
+            List of dicts with: source_path, final_path, source_size, output_size
+        """
+        report = []
+        with self.files_lock:
+            for f in self.files:
+                if f.state == FileState.UPLOADED:
+                    report.append({
+                        'source_path': f.source_path,
+                        'final_path': f.final_path,
+                        'source_size': f.source_size or 0,
+                        'output_size': f.output_size or 0,
+                    })
+        return report
+
+    def confirm_replacements(self) -> Dict:
+        """
+        Delete originals for all UPLOADED files, completing the replacement.
+
+        For each UPLOADED file:
+        1. Verify the uploaded encoded file still exists on network
+        2. Delete the original source file
+        3. Mark as COMPLETE
+        4. Save state after each deletion (crash-safe)
+
+        Returns:
+            Summary dict: {'replaced': int, 'failed': int, 'bytes_freed': int, 'errors': list}
+        """
+        summary = {'replaced': 0, 'failed': 0, 'bytes_freed': 0, 'errors': []}
+
+        with self.files_lock:
+            uploaded_files = [f for f in self.files if f.state == FileState.UPLOADED]
+
+        for queued_file in uploaded_files:
+            try:
+                source = Path(queued_file.source_path)
+                final = Path(queued_file.final_path)
+
+                # Verify the uploaded file still exists on network
+                if not final.exists():
+                    error_msg = f"Encoded file missing on network: {final}"
+                    queued_file.error = error_msg
+                    summary['errors'].append(error_msg)
+                    summary['failed'] += 1
+                    continue
+
+                # Delete original if it's a different file than the final
+                if source.exists() and source != final:
+                    source_size = source.stat().st_size
+                    source.unlink()
+                    summary['bytes_freed'] += source_size
+                    if self.verbose:
+                        self.logger.info(f"Deleted original: {source.name}")
+                elif source.exists() and source == final:
+                    # Same path (e.g., .mp4 → .mp4), original is already overwritten
+                    pass
+
+                self._update_file_state(queued_file, FileState.COMPLETE)
+                summary['replaced'] += 1
+
+                # Save state after each deletion for crash safety
+                self.save_state()
+
+            except Exception as e:
+                error_msg = f"Failed to replace {queued_file.source_path}: {e}"
+                self.logger.error(error_msg)
+                queued_file.error = error_msg
+                summary['errors'].append(error_msg)
+                summary['failed'] += 1
+                self.save_state()
+
+        return summary
 
     def cleanup(self) -> None:
         """Clean up temp directory and state file"""

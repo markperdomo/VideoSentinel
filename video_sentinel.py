@@ -22,7 +22,7 @@ from network_queue_manager import NetworkQueueManager
 from shutdown_manager import start_shutdown_listener, stop_shutdown_listener, shutdown_requested
 from stats import StatsCollector
 from sample_generator import create_sample_video
-from ui import console, section_header, success, error, warning, create_scan_progress, create_batch_progress, fit_filename
+from ui import console, section_header, success, error, warning, create_scan_progress, create_batch_progress, fit_filename, create_replacement_table, format_size
 
 
 def rank_video_quality(video_path: Path, video_info: VideoInfo, analyzer: VideoAnalyzer = None) -> int:
@@ -379,7 +379,13 @@ def main():
     parser.add_argument(
         '--replace-original',
         action='store_true',
-        help='Replace original files with re-encoded versions (deletes source, renames output)'
+        help='Replace original files with re-encoded versions (deletes source after validation)'
+    )
+
+    parser.add_argument(
+        '--replace-after-review',
+        action='store_true',
+        help='Encode all files first, show review report, then prompt before deleting originals'
     )
 
     parser.add_argument(
@@ -831,13 +837,16 @@ def main():
                         "  2. ENCODE: Local encoding (fast!)\n"
                         "  3. UPLOAD: Local \u2192 Network")
 
+                    # Either flag enables deferred replacement in queue mode
+                    do_replace = args.replace_original or args.replace_after_review
+
                     # Initialize queue manager
                     queue_manager = NetworkQueueManager(
                         temp_dir=args.temp_dir,
                         max_buffer_size=args.buffer_size,
                         max_temp_size_gb=args.max_temp_size,
                         verbose=args.verbose,
-                        replace_original=args.replace_original,
+                        replace_original=do_replace,
                         parallel=args.parallel
                     )
 
@@ -894,9 +903,46 @@ def main():
                         # Show final progress
                         progress = queue_manager.get_progress()
                         section_header("QUEUE MODE COMPLETE")
+                        completed_count = progress['complete'] + progress.get('uploaded', 0)
                         console.print(f"Total: {progress['total']}")
-                        console.print(f"Completed: [success]{progress['complete']}[/success]")
+                        console.print(f"Completed: [success]{completed_count}[/success]")
                         console.print(f"Failed: [error]{progress['failed']}[/error]")
+
+                        # Handle deferred replacement (--replace-original or --replace-after-review)
+                        if do_replace:
+                            report = queue_manager.get_replacement_report()
+                            if report:
+                                console.print()
+                                table = create_replacement_table(report)
+                                console.print(table)
+                                console.print()
+
+                                proceed = True
+                                if args.replace_after_review:
+                                    # Interactive: prompt before deleting originals
+                                    total_source = sum(r['source_size'] for r in report)
+                                    total_output = sum(r['output_size'] for r in report)
+                                    space_freed = max(0, total_source - total_output)
+                                    answer = console.input(
+                                        f"Replace [bold]{len(report)}[/bold] originals, "
+                                        f"freeing [success]{format_size(space_freed)}[/success]? [y/N] "
+                                    )
+                                    proceed = answer.strip().lower() in ('y', 'yes')
+
+                                if proceed:
+                                    summary = queue_manager.confirm_replacements()
+                                    console.print()
+                                    console.print(f"[success]\u2713[/success] Replaced: {summary['replaced']} files")
+                                    if summary['bytes_freed'] > 0:
+                                        console.print(f"  Space freed: [success]{format_size(summary['bytes_freed'])}[/success]")
+                                    if summary['failed'] > 0:
+                                        console.print(f"[error]\u2717[/error] Failed: {summary['failed']} files")
+                                        for err in summary['errors']:
+                                            console.print(f"  [error]{err}[/error]")
+                                else:
+                                    console.print()
+                                    console.print("[info]Replacement skipped.[/info] Both original and encoded files exist on the network.")
+                                    console.print("Run [bold]--filename-duplicates[/bold] later to clean up.")
 
                         # Cleanup temp directory
                         queue_manager.cleanup()
