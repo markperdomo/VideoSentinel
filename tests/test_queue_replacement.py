@@ -3,15 +3,17 @@ Tests for the deferred replacement workflow in queue mode.
 
 Covers:
 - FileState.UPLOADED state transitions
-- QueuedFile size tracking fields
+- QueuedFile size tracking and duration fields
 - Post-upload validation (size matching)
 - get_replacement_report() method
-- confirm_replacements() method
+- confirm_replacements() with ffprobe duration validation
+- _validate_uploaded_video() method
 - load_state() handling of UPLOADED state
 - UI replacement table creation
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -50,9 +52,10 @@ class TestFileStateUploaded:
         )
         assert qf.source_size is None
         assert qf.output_size is None
+        assert qf.source_duration is None
 
     def test_queued_file_serialization_roundtrip(self):
-        """to_dict / from_dict should preserve size fields."""
+        """to_dict / from_dict should preserve size and duration fields."""
         qf = QueuedFile(
             source_path="/src/video.avi",
             local_path="/tmp/download_video.avi",
@@ -61,19 +64,22 @@ class TestFileStateUploaded:
             state=FileState.UPLOADED,
             source_size=5_000_000,
             output_size=2_000_000,
+            source_duration=120.5,
         )
         data = qf.to_dict()
         assert data['state'] == 'uploaded'
         assert data['source_size'] == 5_000_000
         assert data['output_size'] == 2_000_000
+        assert data['source_duration'] == 120.5
 
         restored = QueuedFile.from_dict(data)
         assert restored.state == FileState.UPLOADED
         assert restored.source_size == 5_000_000
         assert restored.output_size == 2_000_000
+        assert restored.source_duration == 120.5
 
     def test_from_dict_missing_size_fields(self):
-        """Old state files without size fields should still deserialize."""
+        """Old state files without size/duration fields should still deserialize."""
         data = {
             'source_path': '/src/video.avi',
             'local_path': None,
@@ -81,11 +87,12 @@ class TestFileStateUploaded:
             'final_path': None,
             'state': 'pending',
             'error': None,
-            # No source_size or output_size keys
+            # No source_size, output_size, or source_duration keys
         }
         qf = QueuedFile.from_dict(data)
         assert qf.source_size is None
         assert qf.output_size is None
+        assert qf.source_duration is None
 
 
 # ---------------------------------------------------------------------------
@@ -116,14 +123,79 @@ class TestGetReplacementReport:
 
 
 # ---------------------------------------------------------------------------
+# _validate_uploaded_video
+# ---------------------------------------------------------------------------
+
+class TestValidateUploadedVideo:
+    """Tests for the ffprobe-based validation in confirm_replacements."""
+
+    def test_missing_file_returns_error(self, tmp_path):
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        result = mgr._validate_uploaded_video(tmp_path / "nonexistent.mp4", source_duration=10.0)
+        assert result is not None
+        assert "does not exist" in result
+
+    def test_tiny_file_returns_error(self, tmp_path):
+        tiny = tmp_path / "tiny.mp4"
+        tiny.write_bytes(b"\x00" * 100)  # < 1KB
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        result = mgr._validate_uploaded_video(tiny, source_duration=10.0)
+        assert result is not None
+        assert "too small" in result
+
+    def test_ffprobe_failure_returns_error(self, tmp_path):
+        """Non-video file should fail ffprobe check."""
+        fake = tmp_path / "fake.mp4"
+        fake.write_bytes(b"\x00" * 5000)  # > 1KB but not a real video
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        result = mgr._validate_uploaded_video(fake, source_duration=10.0)
+        assert result is not None
+        assert "ffprobe" in result.lower() or "No video stream" in result
+
+    def test_valid_video_passes(self, real_video, tmp_path):
+        """A real video file should pass validation."""
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        result = mgr._validate_uploaded_video(real_video, source_duration=2.0)
+        assert result is None  # No error
+
+    def test_duration_mismatch_returns_error(self, real_video, tmp_path):
+        """A video with wrong source_duration should fail duration check."""
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        # Real video is 2s, claim source was 100s
+        result = mgr._validate_uploaded_video(real_video, source_duration=100.0)
+        assert result is not None
+        assert "Duration mismatch" in result
+
+    def test_no_source_duration_skips_check(self, real_video, tmp_path):
+        """If source_duration is None, duration check is skipped."""
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+        result = mgr._validate_uploaded_video(real_video, source_duration=None)
+        assert result is None  # Should pass without duration comparison
+
+    def test_ffprobe_timeout_returns_error(self, tmp_path):
+        """ffprobe timeout should return an error, not raise."""
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"\x00" * 5000)
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False)
+
+        with patch('network_queue_manager.subprocess.run', side_effect=subprocess.TimeoutExpired('ffprobe', 60)):
+            result = mgr._validate_uploaded_video(video, source_duration=10.0)
+        assert result is not None
+        assert "timeout" in result.lower()
+
+
+# ---------------------------------------------------------------------------
 # confirm_replacements
 # ---------------------------------------------------------------------------
 
 class TestConfirmReplacements:
 
+    def _mock_validation_pass(self, *args, **kwargs):
+        """Mock that always passes validation."""
+        return None
+
     def test_deletes_originals_and_marks_complete(self, tmp_path):
         """confirm_replacements should delete original, mark COMPLETE."""
-        # Create fake files on "network"
         network_dir = tmp_path / "network"
         network_dir.mkdir()
         orig = network_dir / "video.avi"
@@ -143,13 +215,14 @@ class TestConfirmReplacements:
         )
         mgr.files = [qf]
 
-        summary = mgr.confirm_replacements()
+        with patch.object(mgr, '_validate_uploaded_video', self._mock_validation_pass):
+            summary = mgr.confirm_replacements()
 
         assert summary['replaced'] == 1
         assert summary['failed'] == 0
         assert summary['bytes_freed'] == 5000
-        assert not orig.exists()  # Original deleted
-        assert encoded.exists()   # Encoded still there
+        assert not orig.exists()
+        assert encoded.exists()
         assert qf.state == FileState.COMPLETE
 
     def test_same_path_no_error(self, tmp_path):
@@ -164,17 +237,49 @@ class TestConfirmReplacements:
             source_path=str(video),
             local_path=None,
             output_path=None,
-            final_path=str(video),  # Same path
+            final_path=str(video),
             state=FileState.UPLOADED,
             source_size=5000,
             output_size=3000,
         )
         mgr.files = [qf]
 
-        summary = mgr.confirm_replacements()
+        with patch.object(mgr, '_validate_uploaded_video', self._mock_validation_pass):
+            summary = mgr.confirm_replacements()
         assert summary['replaced'] == 1
         assert summary['failed'] == 0
-        assert video.exists()  # File should still exist (it was overwritten, not deleted)
+        assert video.exists()
+
+    def test_fails_if_validation_fails(self, tmp_path):
+        """If validation returns an error, original should NOT be deleted."""
+        network_dir = tmp_path / "network"
+        network_dir.mkdir()
+        orig = network_dir / "video.avi"
+        orig.write_bytes(b"\x00" * 5000)
+        encoded = network_dir / "video.mp4"
+        encoded.write_bytes(b"\x00" * 3000)
+
+        mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False, replace_original=True)
+        qf = QueuedFile(
+            source_path=str(orig),
+            local_path=None,
+            output_path=None,
+            final_path=str(encoded),
+            state=FileState.UPLOADED,
+            source_duration=100.0,
+        )
+        mgr.files = [qf]
+
+        def mock_fail(*args, **kwargs):
+            return "Duration mismatch: 2.0s vs 100.0s"
+
+        with patch.object(mgr, '_validate_uploaded_video', mock_fail):
+            summary = mgr.confirm_replacements()
+
+        assert summary['replaced'] == 0
+        assert summary['failed'] == 1
+        assert orig.exists()  # Original preserved
+        assert "Duration mismatch" in summary['errors'][0]
 
     def test_fails_if_encoded_missing(self, tmp_path):
         """If the encoded file is missing from network, should fail gracefully."""
@@ -182,22 +287,22 @@ class TestConfirmReplacements:
         network_dir.mkdir()
         orig = network_dir / "video.avi"
         orig.write_bytes(b"\x00" * 5000)
-        # No encoded file
 
         mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False, replace_original=True)
         qf = QueuedFile(
             source_path=str(orig),
             local_path=None,
             output_path=None,
-            final_path=str(network_dir / "video.mp4"),  # Doesn't exist
+            final_path=str(network_dir / "video.mp4"),
             state=FileState.UPLOADED,
         )
         mgr.files = [qf]
 
+        # Don't mock — _validate_uploaded_video will detect missing file
         summary = mgr.confirm_replacements()
         assert summary['replaced'] == 0
         assert summary['failed'] == 1
-        assert orig.exists()  # Original should NOT be deleted
+        assert orig.exists()
 
     def test_state_saved_after_each_deletion(self, tmp_path):
         """Crash safety: state is saved after each file replacement."""
@@ -218,9 +323,61 @@ class TestConfirmReplacements:
         )
         mgr.files = [qf]
 
-        with patch.object(mgr, 'save_state') as mock_save:
+        with patch.object(mgr, '_validate_uploaded_video', self._mock_validation_pass), \
+             patch.object(mgr, 'save_state') as mock_save:
             mgr.confirm_replacements()
             assert mock_save.call_count >= 1
+
+    def test_confirm_with_real_video(self, real_video, tmp_path):
+        """End-to-end: confirm_replacements with a real video passes duration check."""
+        import shutil
+
+        network_dir = tmp_path / "network"
+        network_dir.mkdir()
+        orig = network_dir / "video.avi"
+        orig.write_bytes(b"\x00" * 5000)  # Fake original
+        encoded = network_dir / "video.mp4"
+        shutil.copy2(real_video, encoded)  # Real video as the encoded output
+
+        mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False, replace_original=True)
+        qf = QueuedFile(
+            source_path=str(orig),
+            local_path=None,
+            output_path=None,
+            final_path=str(encoded),
+            state=FileState.UPLOADED,
+            source_size=5000,
+            output_size=encoded.stat().st_size,
+            source_duration=2.0,  # Matches the real 2-second video
+        )
+        mgr.files = [qf]
+
+        summary = mgr.confirm_replacements()
+        assert summary['replaced'] == 1
+        assert summary['failed'] == 0
+        assert not orig.exists()
+
+
+# ---------------------------------------------------------------------------
+# _get_duration helper
+# ---------------------------------------------------------------------------
+
+class TestGetDuration:
+
+    def test_real_video_returns_duration(self, real_video, tmp_path):
+        duration = NetworkQueueManager._get_duration(real_video)
+        assert duration is not None
+        assert abs(duration - 2.0) < 1.0  # ~2 second test video
+
+    def test_nonexistent_returns_none(self, tmp_path):
+        result = NetworkQueueManager._get_duration(tmp_path / "nope.mp4")
+        assert result is None
+
+    def test_non_video_returns_none(self, tmp_path):
+        fake = tmp_path / "fake.mp4"
+        fake.write_bytes(b"\x00" * 5000)
+        result = NetworkQueueManager._get_duration(fake)
+        assert result is None or result == 0.0  # ffprobe may return 0 for garbage
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +400,7 @@ class TestLoadStateUploaded:
                     'error': None,
                     'source_size': 5000,
                     'output_size': 3000,
+                    'source_duration': 120.5,
                 },
             ],
             'timestamp': 1000,
@@ -253,12 +411,11 @@ class TestLoadStateUploaded:
 
         result = mgr.load_state()
         assert result is True
-        # Should not be in any processing queue
         assert mgr.download_queue.empty()
         assert mgr.encode_queue.empty()
         assert mgr.upload_queue.empty()
-        # File should remain in UPLOADED state
         assert mgr.files[0].state == FileState.UPLOADED
+        assert mgr.files[0].source_duration == 120.5
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +454,7 @@ class TestUIHelpers:
         ]
         table = create_replacement_table(report)
         assert table.title == "Replacement Summary"
-        # 2 data rows + 1 totals row
-        assert len(table.rows) == 3
+        assert len(table.rows) == 3  # 2 data rows + 1 totals row
 
     def test_create_replacement_table_empty(self):
         table = create_replacement_table([])

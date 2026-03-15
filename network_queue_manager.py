@@ -13,6 +13,7 @@ This dramatically improves performance when working with network storage by:
 """
 
 import shutil
+import subprocess
 import tempfile
 import threading
 import queue
@@ -48,8 +49,9 @@ class QueuedFile:
     final_path: Optional[str]     # Final network destination (None until uploaded)
     state: FileState
     error: Optional[str] = None
-    source_size: Optional[int] = None   # Original file size in bytes
-    output_size: Optional[int] = None   # Encoded file size in bytes
+    source_size: Optional[int] = None      # Original file size in bytes
+    output_size: Optional[int] = None      # Encoded file size in bytes
+    source_duration: Optional[float] = None  # Original video duration in seconds
 
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization"""
@@ -524,12 +526,16 @@ class NetworkQueueManager:
                     # Copy encoded file to network destination
                     final.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Record file sizes for reporting
+                    # Record file sizes and source duration for reporting & confirmation
                     source = Path(queued_file.source_path)
                     try:
                         queued_file.source_size = source.stat().st_size
                     except OSError:
                         pass  # Source may be on slow network, size is best-effort
+
+                    # Get source duration for confirmation-phase validation
+                    if queued_file.source_duration is None:
+                        queued_file.source_duration = self._get_duration(source)
                     local_output_size = output.stat().st_size
                     queued_file.output_size = local_output_size
 
@@ -799,12 +805,91 @@ class NetworkQueueManager:
                     })
         return report
 
+    @staticmethod
+    def _get_duration(video_path: Path, timeout: int = 60) -> Optional[float]:
+        """Get video duration in seconds via ffprobe. Returns None on failure."""
+        try:
+            cmd = [
+                'ffprobe', '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format',
+                str(video_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode != 0:
+                return None
+            data = json.loads(result.stdout)
+            return float(data.get('format', {}).get('duration', 0)) or None
+        except Exception:
+            return None
+
+    def _validate_uploaded_video(
+        self, final_path: Path, source_duration: Optional[float],
+        duration_tolerance: float = 2.0
+    ) -> Optional[str]:
+        """
+        Validate an uploaded video on the network before deleting the original.
+
+        Checks:
+        1. File exists and size > 1KB
+        2. ffprobe can read it and finds a video stream
+        3. Duration matches source within tolerance
+
+        Returns:
+            None if valid, or an error message string if validation failed.
+        """
+        if not final_path.exists():
+            return f"File does not exist: {final_path}"
+
+        if final_path.stat().st_size < 1024:
+            return f"File too small ({final_path.stat().st_size} bytes): {final_path.name}"
+
+        # ffprobe the uploaded file (longer timeout for network paths)
+        try:
+            cmd = [
+                'ffprobe', '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format', '-show_streams',
+                str(final_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                return f"ffprobe cannot read file: {final_path.name}"
+
+            data = json.loads(result.stdout)
+
+            # Check for video stream
+            has_video = any(
+                s.get('codec_type') == 'video' for s in data.get('streams', [])
+            )
+            if not has_video:
+                return f"No video stream found: {final_path.name}"
+
+            # Duration check
+            if source_duration and source_duration > 0:
+                output_duration = float(data.get('format', {}).get('duration', 0))
+                if output_duration > 0:
+                    diff = abs(output_duration - source_duration)
+                    if diff > duration_tolerance:
+                        return (
+                            f"Duration mismatch: {final_path.name} "
+                            f"({output_duration:.1f}s vs source {source_duration:.1f}s, "
+                            f"diff={diff:.1f}s)"
+                        )
+
+        except subprocess.TimeoutExpired:
+            return f"ffprobe timeout (network may be slow): {final_path.name}"
+        except Exception as e:
+            return f"Validation error: {e}"
+
+        return None  # All checks passed
+
     def confirm_replacements(self) -> Dict:
         """
         Delete originals for all UPLOADED files, completing the replacement.
 
         For each UPLOADED file:
-        1. Verify the uploaded encoded file still exists on network
+        1. Validate the uploaded encoded file (ffprobe, duration check)
         2. Delete the original source file
         3. Mark as COMPLETE
         4. Save state after each deletion (crash-safe)
@@ -822,9 +907,13 @@ class NetworkQueueManager:
                 source = Path(queued_file.source_path)
                 final = Path(queued_file.final_path)
 
-                # Verify the uploaded file still exists on network
-                if not final.exists():
-                    error_msg = f"Encoded file missing on network: {final}"
+                # Validate uploaded file: existence, ffprobe, duration match
+                validation_error = self._validate_uploaded_video(
+                    final, queued_file.source_duration
+                )
+                if validation_error:
+                    error_msg = f"Skipping replacement — {validation_error}"
+                    self.logger.error(error_msg)
                     queued_file.error = error_msg
                     summary['errors'].append(error_msg)
                     summary['failed'] += 1
