@@ -143,9 +143,12 @@ class NetworkQueueManager:
             logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
     def add_files(self, source_paths: List[Path]) -> None:
-        """Add files to the processing queue"""
+        """Add files to the processing queue, skipping any already present (e.g. from resume)"""
         with self.files_lock:
+            existing_sources = {f.source_path for f in self.files}
             for path in source_paths:
+                if str(path) in existing_sources:
+                    continue
                 queued_file = QueuedFile(
                     source_path=str(path),
                     local_path=None,
