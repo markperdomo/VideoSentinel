@@ -10,6 +10,8 @@ Features:
 """
 
 import argparse
+import fcntl
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -470,6 +472,24 @@ def main():
             console.print("No temp files found")
 
         sys.exit(0)
+
+    # Acquire process lock to prevent overlapping sessions
+    lockfile_path = Path.home() / ".videosentinel.lock"
+    try:
+        lock_fd = open(lockfile_path, "a+")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_fd.seek(0)
+        lock_fd.truncate()
+        lock_fd.write(str(os.getpid()))
+        lock_fd.flush()
+    except OSError:
+        # Lock held by another process — read its PID
+        try:
+            existing_pid = lockfile_path.read_text().strip()
+            console.print(f"[error]Another VideoSentinel session is already running (PID {existing_pid}). Exiting.[/error]", highlight=False)
+        except Exception:
+            console.print("[error]Another VideoSentinel session is already running. Exiting.[/error]", highlight=False)
+        sys.exit(1)
 
     if not args.paths and not args.file_list and not args.clear_queue:
         console.print(f"[error]Error: Path argument or --file-list is required (provide one or more video files/directories or a file list)[/error]", highlight=False)
@@ -1138,12 +1158,59 @@ def main():
                     start_shutdown_listener()
                     queue_manager.start(quicklook_fix_callback)
 
+                    # If shutdown was requested, exit gracefully
+                    if shutdown_requested():
+                        console.print("Queue processing stopped by user.")
+                        sys.exit(0)
+
                     # Show final progress
                     progress = queue_manager.get_progress()
                     section_header("QUEUE MODE COMPLETE")
-                    console.print(f"Completed: [success]{progress['complete']}[/success]")
+                    completed_count = progress['complete'] + progress.get('uploaded', 0)
+                    console.print(f"Total: {progress['total']}")
+                    console.print(f"Completed: [success]{completed_count}[/success]")
                     if progress['failed'] > 0:
                         console.print(f"Failed: [error]{progress['failed']}[/error]")
+
+                    # Handle deferred replacement (--replace-original or --replace-after-review)
+                    do_replace = args.replace_original or args.replace_after_review
+                    if do_replace:
+                        report = queue_manager.get_replacement_report()
+                        if report:
+                            console.print()
+                            table = create_replacement_table(report)
+                            console.print(table)
+                            console.print()
+
+                            proceed = True
+                            if args.replace_after_review:
+                                # Interactive: prompt before deleting originals
+                                total_source = sum(r['source_size'] for r in report)
+                                total_output = sum(r['output_size'] for r in report)
+                                space_freed = max(0, total_source - total_output)
+                                answer = console.input(
+                                    f"Replace [bold]{len(report)}[/bold] originals, "
+                                    f"freeing [success]{format_size(space_freed)}[/success]? [y/N] "
+                                )
+                                proceed = answer.strip().lower() in ('y', 'yes')
+
+                            if proceed:
+                                summary = queue_manager.confirm_replacements()
+                                console.print()
+                                console.print(f"[success]\u2713[/success] Replaced: {summary['replaced']} files")
+                                if summary['bytes_freed'] > 0:
+                                    console.print(f"  Space freed: [success]{format_size(summary['bytes_freed'])}[/success]")
+                                if summary['failed'] > 0:
+                                    console.print(f"[error]\u2717[/error] Failed: {summary['failed']} files")
+                                    for err in summary['errors']:
+                                        console.print(f"  [error]{err}[/error]")
+                            else:
+                                console.print()
+                                console.print("[info]Replacement skipped.[/info] Both original and encoded files exist on the network.")
+                                console.print("Run [bold]--filename-duplicates[/bold] later to clean up.")
+
+                    # Cleanup temp directory
+                    queue_manager.cleanup()
 
                 except KeyboardInterrupt:
                     console.print("\n\nInterrupted by user. Queue state saved for resume.")

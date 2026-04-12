@@ -445,11 +445,12 @@ class VideoAnalyzer:
                 issues.append(f"Container is {container}, should be MP4")
                 needs_remux = True
 
-            # Check 2: Codec must be H.264 or HEVC for QuickLook
+            # Check 2: Codec must be H.264, HEVC, or AV1 for QuickLook
+            # AV1 supported in macOS Ventura 13+ (hardware decode on M3+)
             codec_name = video_stream.get('codec_name', '').lower()
-            supported_codecs = ['h264', 'avc1', 'hevc', 'h265', 'mpeg4']
+            supported_codecs = ['h264', 'avc1', 'hevc', 'h265', 'av1', 'mpeg4']
             if codec_name not in supported_codecs:
-                issues.append(f"Codec is {codec_name}, should be H.264 or HEVC for QuickLook")
+                issues.append(f"Codec is {codec_name}, should be H.264, HEVC, or AV1 for QuickLook")
                 needs_reencode = True
 
             # Check 3: For HEVC, check codec tag (should be hvc1, not hev1)
@@ -462,13 +463,14 @@ class VideoAnalyzer:
 
             # Check 4: Pixel format compatibility
             # macOS QuickLook supports 10-bit HEVC natively (since High Sierra),
-            # so only force re-encode for truly unsupported pixel formats.
+            # and 10-bit AV1 natively (since Ventura).
+            # Only force re-encode for truly unsupported pixel formats.
             pix_fmt = video_stream.get('pix_fmt', '').lower()
             if pix_fmt and pix_fmt != 'yuv420p':
-                # HEVC supports 10-bit 4:2:0 in QuickLook via hardware decoder
-                hevc_compatible_fmts = {'yuv420p', 'yuv420p10le', 'yuv420p10be'}
-                if codec_name in ['hevc', 'h265'] and pix_fmt in hevc_compatible_fmts:
-                    pass  # 10-bit HEVC is QuickLook compatible, no action needed
+                # HEVC and AV1 support 10-bit 4:2:0 in QuickLook via hardware decoder
+                ten_bit_compatible_fmts = {'yuv420p', 'yuv420p10le', 'yuv420p10be'}
+                if codec_name in ['hevc', 'h265', 'av1'] and pix_fmt in ten_bit_compatible_fmts:
+                    pass  # 10-bit HEVC/AV1 is QuickLook compatible, no action needed
                 else:
                     issues.append(f"Pixel format is {pix_fmt}, needs re-encode for QuickLook")
                     needs_reencode = True

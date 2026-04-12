@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -276,3 +277,118 @@ class TestGetVideoInfoIntegration:
     def test_nonexistent_file_returns_none(self):
         analyzer = VideoAnalyzer(use_cache=False)
         assert analyzer.get_video_info(Path("/nonexistent/file.mp4")) is None
+
+
+# ===== QuickLook compatibility =====
+
+def _mock_ffprobe_result(codec_name, codec_tag, pix_fmt, format_name):
+    """Build a mock subprocess.CompletedProcess mimicking ffprobe JSON output."""
+    data = {
+        "format": {"format_name": format_name, "tags": {}},
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": codec_name,
+                "codec_tag_string": codec_tag,
+                "pix_fmt": pix_fmt,
+            }
+        ],
+    }
+    return MagicMock(returncode=0, stdout=json.dumps(data))
+
+
+class TestCheckQuickLookCompatibility:
+    """Tests for VideoAnalyzer.check_quicklook_compatibility."""
+
+    def _check(self, codec_name, codec_tag="", pix_fmt="yuv420p", format_name="mp4"):
+        analyzer = VideoAnalyzer(use_cache=False)
+        mock_result = _mock_ffprobe_result(codec_name, codec_tag, pix_fmt, format_name)
+        with patch("video_analyzer.subprocess.run", return_value=mock_result):
+            return analyzer.check_quicklook_compatibility(Path("/fake/video.mp4"))
+
+    # --- AV1 support ---
+
+    def test_av1_in_mp4_is_compatible(self):
+        compat = self._check("av1", format_name="mp4")
+        assert compat["compatible"] is True
+        assert not compat["needs_remux"]
+        assert not compat["needs_reencode"]
+
+    def test_av1_in_mkv_needs_remux_only(self):
+        compat = self._check("av1", format_name="matroska,webm")
+        assert compat["compatible"] is False
+        assert compat["needs_remux"] is True
+        assert compat["needs_reencode"] is False
+        assert any("Container" in issue for issue in compat["issues"])
+
+    def test_av1_10bit_in_mp4_is_compatible(self):
+        compat = self._check("av1", pix_fmt="yuv420p10le", format_name="mp4")
+        assert compat["compatible"] is True
+        assert not compat["needs_reencode"]
+
+    def test_av1_10bit_in_mkv_needs_remux_only(self):
+        compat = self._check("av1", pix_fmt="yuv420p10le", format_name="matroska,webm")
+        assert compat["compatible"] is False
+        assert compat["needs_remux"] is True
+        assert compat["needs_reencode"] is False
+
+    def test_av1_unsupported_pix_fmt_needs_reencode(self):
+        compat = self._check("av1", pix_fmt="yuv444p", format_name="mp4")
+        assert compat["needs_reencode"] is True
+
+    # --- HEVC support ---
+
+    def test_hevc_hvc1_in_mp4_is_compatible(self):
+        compat = self._check("hevc", codec_tag="hvc1", format_name="mp4")
+        assert compat["compatible"] is True
+
+    def test_hevc_hev1_in_mp4_needs_remux(self):
+        compat = self._check("hevc", codec_tag="hev1", format_name="mp4")
+        assert compat["compatible"] is False
+        assert compat["needs_remux"] is True
+        assert not compat["needs_reencode"]
+
+    def test_hevc_in_mkv_needs_remux(self):
+        compat = self._check("hevc", codec_tag="hvc1", format_name="matroska,webm")
+        assert compat["compatible"] is False
+        assert compat["needs_remux"] is True
+
+    def test_hevc_10bit_is_compatible(self):
+        compat = self._check("hevc", codec_tag="hvc1", pix_fmt="yuv420p10le", format_name="mp4")
+        assert compat["compatible"] is True
+
+    # --- H.264 support ---
+
+    def test_h264_in_mp4_is_compatible(self):
+        compat = self._check("h264", format_name="mp4")
+        assert compat["compatible"] is True
+
+    def test_h264_in_mkv_needs_remux(self):
+        compat = self._check("h264", format_name="matroska,webm")
+        assert compat["needs_remux"] is True
+
+    # --- Unsupported codecs ---
+
+    def test_vp9_needs_reencode(self):
+        compat = self._check("vp9", format_name="mp4")
+        assert compat["needs_reencode"] is True
+
+    def test_mpeg2video_needs_reencode(self):
+        compat = self._check("mpeg2video", format_name="mp4")
+        assert compat["needs_reencode"] is True
+
+    # --- Edge cases ---
+
+    def test_mov_container_is_compatible(self):
+        compat = self._check("h264", format_name="mov,mp4,m4a,3gp,3g2,mj2")
+        assert compat["compatible"] is True
+        assert not compat["needs_remux"]
+
+    def test_ffprobe_failure_returns_not_compatible(self):
+        analyzer = VideoAnalyzer(use_cache=False)
+        mock_result = MagicMock(returncode=1, stdout="", stderr="error")
+        with patch("video_analyzer.subprocess.run", return_value=mock_result):
+            compat = analyzer.check_quicklook_compatibility(Path("/fake/video.mp4"))
+        assert compat["compatible"] is False
+        assert not compat["needs_remux"]
+        assert not compat["needs_reencode"]

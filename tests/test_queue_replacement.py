@@ -459,3 +459,131 @@ class TestUIHelpers:
     def test_create_replacement_table_empty(self):
         table = create_replacement_table([])
         assert len(table.rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# Replacement with different extensions (MKV -> MP4)
+# ---------------------------------------------------------------------------
+
+class TestReplacementDifferentExtension:
+    """Verify confirm_replacements deletes the original when the source
+    extension differs from the final extension (e.g., .mkv -> .mp4)."""
+
+    def test_mkv_original_deleted_when_mp4_uploaded(self, tmp_path):
+        """Original .mkv should be deleted when .mp4 replacement is validated."""
+        network = tmp_path / "network"
+        network.mkdir()
+
+        orig_mkv = network / "video.mkv"
+        orig_mkv.write_bytes(b"\x00" * 8000)
+        encoded_mp4 = network / "video.mp4"
+        encoded_mp4.write_bytes(b"\x00" * 3000)
+
+        mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False,
+                                  replace_original=True)
+        qf = QueuedFile(
+            source_path=str(orig_mkv),
+            local_path=None,
+            output_path=None,
+            final_path=str(encoded_mp4),
+            state=FileState.UPLOADED,
+            source_size=8000,
+            output_size=3000,
+            source_duration=120.0,
+        )
+        mgr.files = [qf]
+
+        with patch.object(mgr, '_validate_uploaded_video', return_value=None):
+            summary = mgr.confirm_replacements()
+
+        assert summary['replaced'] == 1
+        assert summary['failed'] == 0
+        assert not orig_mkv.exists(), "Original .mkv should have been deleted"
+        assert encoded_mp4.exists(), "Encoded .mp4 should still exist"
+        assert qf.state == FileState.COMPLETE
+        assert summary['bytes_freed'] == 8000
+
+    def test_same_extension_mp4_to_mp4(self, tmp_path):
+        """When source and final are the same path (.mp4 -> .mp4), original
+        is overwritten by upload — no deletion needed, still marks COMPLETE."""
+        network = tmp_path / "network"
+        network.mkdir()
+
+        orig = network / "video.mp4"
+        orig.write_bytes(b"\x00" * 5000)
+
+        mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False,
+                                  replace_original=True)
+        qf = QueuedFile(
+            source_path=str(orig),
+            local_path=None,
+            output_path=None,
+            final_path=str(orig),  # Same path
+            state=FileState.UPLOADED,
+            source_size=5000,
+            output_size=3000,
+            source_duration=60.0,
+        )
+        mgr.files = [qf]
+
+        with patch.object(mgr, '_validate_uploaded_video', return_value=None):
+            summary = mgr.confirm_replacements()
+
+        assert summary['replaced'] == 1
+        assert qf.state == FileState.COMPLETE
+        # bytes_freed is 0 because source == final (already overwritten)
+        assert summary['bytes_freed'] == 0
+
+    def test_encode_worker_sets_mp4_final_path_for_mkv_source(self, tmp_path):
+        """When replace_original is True, final_path should use .mp4 extension
+        even when source is .mkv."""
+        mgr = NetworkQueueManager(temp_dir=tmp_path, verbose=False,
+                                  replace_original=True)
+
+        qf = QueuedFile(
+            source_path="/network/dir/video.mkv",
+            local_path=str(tmp_path / "download_video.mkv"),
+            output_path=None,
+            final_path=None,
+            state=FileState.ENCODING,
+        )
+        mgr.files = [qf]
+
+        # Simulate what _encode_worker does after successful encoding
+        source = Path(qf.source_path)
+        final_path = str(source.with_suffix('.mp4'))
+
+        assert final_path == "/network/dir/video.mp4"
+        assert final_path != qf.source_path  # Different extension
+
+    def test_validation_failure_preserves_mkv_original(self, tmp_path):
+        """If uploaded .mp4 fails validation, original .mkv must be preserved."""
+        network = tmp_path / "network"
+        network.mkdir()
+
+        orig_mkv = network / "video.mkv"
+        orig_mkv.write_bytes(b"\x00" * 8000)
+        encoded_mp4 = network / "video.mp4"
+        encoded_mp4.write_bytes(b"\x00" * 3000)
+
+        mgr = NetworkQueueManager(temp_dir=tmp_path / "temp", verbose=False,
+                                  replace_original=True)
+        qf = QueuedFile(
+            source_path=str(orig_mkv),
+            local_path=None,
+            output_path=None,
+            final_path=str(encoded_mp4),
+            state=FileState.UPLOADED,
+            source_size=8000,
+            output_size=3000,
+            source_duration=120.0,
+        )
+        mgr.files = [qf]
+
+        with patch.object(mgr, '_validate_uploaded_video',
+                          return_value="Duration mismatch: 10.0s vs 120.0s"):
+            summary = mgr.confirm_replacements()
+
+        assert summary['replaced'] == 0
+        assert summary['failed'] == 1
+        assert orig_mkv.exists(), "Original .mkv must be preserved on validation failure"
