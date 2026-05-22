@@ -473,23 +473,33 @@ def main():
 
         sys.exit(0)
 
-    # Acquire process lock to prevent overlapping sessions
-    lockfile_path = Path.home() / ".videosentinel.lock"
+    # Acquire a host-wide process lock to prevent overlapping sessions.
+    # Fixed absolute path (not ~/.) so every launch context — cron, launchd,
+    # sudo, an interactive shell — contends for the SAME lock regardless of
+    # $HOME or which user starts it. The kernel releases the flock when the
+    # process exits, including on crash or kill, so no stale lock can linger.
+    lockfile_path = Path("/tmp/videosentinel.lock")
     try:
         lock_fd = open(lockfile_path, "a+")
+    except OSError as e:
+        console.print(f"[error]Could not open lock file {lockfile_path}: {e}[/error]", highlight=False)
+        sys.exit(1)
+    try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_fd.seek(0)
-        lock_fd.truncate()
-        lock_fd.write(str(os.getpid()))
-        lock_fd.flush()
     except OSError:
-        # Lock held by another process — read its PID
+        # Lock is held by another running VideoSentinel process. Exit 75
+        # (EX_TEMPFAIL) so scheduled wrappers can treat this as "skipped"
+        # rather than a hard failure.
         try:
             existing_pid = lockfile_path.read_text().strip()
             console.print(f"[error]Another VideoSentinel session is already running (PID {existing_pid}). Exiting.[/error]", highlight=False)
         except Exception:
             console.print("[error]Another VideoSentinel session is already running. Exiting.[/error]", highlight=False)
-        sys.exit(1)
+        sys.exit(75)
+    lock_fd.seek(0)
+    lock_fd.truncate()
+    lock_fd.write(str(os.getpid()))
+    lock_fd.flush()
 
     if not args.paths and not args.file_list and not args.clear_queue:
         console.print(f"[error]Error: Path argument or --file-list is required (provide one or more video files/directories or a file list)[/error]", highlight=False)
