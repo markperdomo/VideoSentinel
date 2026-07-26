@@ -32,7 +32,7 @@ The core idea: you shouldn't need to manually audit thousands of video files to 
 - **Smart Quality Ranking**: Automatically keeps the best version based on codec efficiency, resolution, container format, and QuickLook compatibility
 
 ### Performance
-- **Parallel Encoding** (`-j N`): Encode multiple files simultaneously — two x265 instances each using ~7 threads saturate the CPU far better than one trying to use all 14. Per-instance thread counts are automatically constrained so they share the CPU effectively
+- **Parallel Encoding** (`-j N`): Encode multiple files simultaneously — two x265 instances each using ~7 threads saturate the CPU far better than one trying to use all 14. Per-instance thread counts are automatically constrained so they share the CPU effectively, and `N` is scaled back to the number of files actually needing work so a small batch never leaves the CPU idle
 - **Network Queue Mode**: 3-stage pipeline (download → encode → upload) runs all three stages in parallel for 2-3x faster encoding on network/NAS storage. Combines with `-j N` for parallel encoding on network files
 - **Session Summary**: Rich table after each batch showing per-file sizes, compression ratios, and total space saved
 - **Analysis Caching**: Caches ffprobe results to disk so repeat scans are near-instant — handles NAS quirks like mtime changes from media scanners

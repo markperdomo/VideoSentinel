@@ -112,6 +112,20 @@ class VideoEncoder:
                         f"(e.g. 'deblock=-1,-1')."
                     )
 
+    def set_parallel(self, parallel: int) -> None:
+        """
+        Set the number of concurrent encodes this instance is sharing the CPU with.
+
+        The per-instance x265 thread budget is derived from this number, so it
+        must reflect how many encodes actually run at once — not how many the
+        user asked for. Requesting -j 4 for a 2-file batch would otherwise pin
+        each instance to cpu_count // 4 threads and leave half the CPU idle.
+
+        Args:
+            parallel: Concurrent encode count (clamped to at least 1)
+        """
+        self.parallel = max(1, parallel)
+
     def _parse_time_to_seconds(self, time_str: str) -> float:
         """
         Parse FFmpeg time string to seconds
@@ -1342,6 +1356,13 @@ class VideoEncoder:
             Dictionary mapping input paths to success status
         """
         effective_parallel = max(1, parallel if parallel > 1 else self.parallel)
+
+        # Never claim more concurrency than there is work. The x265 thread
+        # budget is cpu_count // parallel, so asking for -j 4 on a 2-file batch
+        # would starve both encodes and leave half the CPU idle.
+        effective_parallel = min(effective_parallel, max(1, len(video_paths)))
+        if effective_parallel != self.parallel:
+            self.set_parallel(effective_parallel)
 
         if effective_parallel > 1:
             results, encoding_stats, batch_elapsed = self._batch_re_encode_parallel(

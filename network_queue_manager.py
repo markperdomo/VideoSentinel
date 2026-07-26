@@ -161,6 +161,27 @@ class NetworkQueueManager:
 
         self.save_state()
 
+    def resolve_parallel(self) -> int:
+        """
+        Clamp the worker count to the number of files that still need encoding.
+
+        Each encoder instance sizes its x265 thread pool as cpu_count // parallel,
+        so spawning 4 workers for 2 remaining files pins each ffmpeg to a quarter
+        of the CPU while half the machine sits idle. Call after add_files() and
+        load_state(), and pass the result to VideoEncoder.set_parallel().
+
+        Returns:
+            The effective worker count (also stored on self.parallel)
+        """
+        with self.files_lock:
+            remaining = sum(
+                1 for f in self.files
+                if f.state not in (FileState.COMPLETE, FileState.UPLOADED, FileState.FAILED)
+            )
+
+        self.parallel = max(1, min(self.parallel, remaining or 1))
+        return self.parallel
+
     def start(self, encode_callback: Callable[[Path, Path], bool]) -> None:
         """
         Start the pipeline workers.

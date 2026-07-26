@@ -300,6 +300,23 @@ Maximizes CPU utilization on high-core-count CPUs where a single x265 instance c
 7. Queue mode: N encode worker threads share a `_encode_completed_count` counter with lock
 8. `parallel=1` (default) runs the existing sequential code path — zero regression risk
 
+**N is clamped to the actual workload before any encode starts.** Because the thread
+budget is `cpu_count // N`, requesting more workers than there are files starves every
+running encode *and* leaves the rest of the CPU idle: `-j 4` over a 2-file batch on a
+14-core box gives each ffmpeg `pools=3, frame-threads=1` — 6 of 14 threads busy, ~40%
+CPU. Clamping to 2 yields `pools=7, frame-threads=3` and uses the whole machine.
+
+- `VideoEncoder.set_parallel(n)` is the single setter for the thread budget
+- `batch_re_encode()` clamps to `len(video_paths)` itself, so the API path is covered
+- `NetworkQueueManager.resolve_parallel()` clamps to files *not* in COMPLETE/UPLOADED/
+  FAILED (so a resumed queue sizes to the work left, not the original total) and returns
+  the value; the CLI feeds it to `set_parallel()` after `add_files()`
+- Both queue-mode call sites in `video_sentinel.py` print a notice when the clamp bites
+
+The clamp is static, decided once before encoding. Sizing it dynamically from live
+concurrency doesn't work: x265 fixes its pool at startup, so the first worker to launch
+would grab the whole CPU and never give it back as later workers start.
+
 **Encoding Session Summary**
 After batch encoding completes, displays a Rich table with:
 1. Per-file rows: original size, output size, compression %, encoding time
@@ -456,6 +473,8 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
 - `--parallel N`, `-j N`: Encode N files simultaneously (default: 1)
   - Constrains per-instance x265 threads so N instances share the CPU effectively
   - Thread allocation: `pools = max(2, cpu_count // N)`, `frame-threads = max(1, pools // 2)`
+  - N is clamped down to the number of files actually needing work, so a partly-done
+    library doesn't split the CPU N ways among two encodes
   - Works with both batch mode and `--queue-mode`
   - Uses ThreadPoolExecutor (CPU work is in ffmpeg subprocesses, no GIL issue)
 - `--output-dir PATH`: Custom directory for re-encoded videos (default: same as source with `_reencoded` suffix)

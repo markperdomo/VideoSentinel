@@ -923,6 +923,19 @@ def main():
                     # Add files to queue
                     queue_manager.add_files(videos_to_encode)
 
+                    # Size the worker pool to the real workload. Each ffmpeg
+                    # gets cpu_count // parallel threads, so 4 workers over
+                    # 2 files would idle half the CPU.
+                    effective_parallel = queue_manager.resolve_parallel()
+                    encoder.set_parallel(effective_parallel)
+                    if effective_parallel != args.parallel:
+                        console.print(
+                            f"[info]Using {effective_parallel} encode worker(s) "
+                            f"(requested {args.parallel}, only {effective_parallel} "
+                            f"file(s) left to encode)[/info]"
+                        )
+                        console.print()
+
                     # Create encoding callback
                     total = len(videos_to_encode)
 
@@ -1160,6 +1173,18 @@ def main():
 
                 # Add files to queue
                 queue_manager.add_files(all_videos_to_fix)
+
+                # Size the worker pool to the real workload (see queue-mode
+                # re-encode path above for why).
+                effective_parallel = queue_manager.resolve_parallel()
+                encoder.set_parallel(effective_parallel)
+                if effective_parallel != args.parallel:
+                    console.print(
+                        f"[info]Using {effective_parallel} worker(s) "
+                        f"(requested {args.parallel}, only {effective_parallel} "
+                        f"file(s) left to fix)[/info]"
+                    )
+                    console.print()
 
                 # Create processing callback
                 def quicklook_fix_callback(local_input: Path, local_output: Path, progress=None, file_task=None) -> bool:
