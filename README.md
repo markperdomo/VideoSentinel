@@ -10,7 +10,14 @@ The core idea: you shouldn't need to manually audit thousands of video files to 
 - **Smart Re-encoding**: Automatically identifies videos in legacy codecs (MPEG2, MPEG4, WMV, XviD, etc.) and re-encodes them to HEVC/H.265, AV1, or VP9
 - **Quality-Matched Encoding**: Analyzes source bitrate-per-pixel to calculate optimal CRF — high-quality sources get low CRF to preserve detail, low-quality sources get higher CRF to avoid wasting space
 - **10-bit HEVC Output**: Encodes to 10-bit color depth (yuv420p10le) by default for better gradient reproduction and less banding at the same file size
+- **Source Profiles** (`--profile webrip`): Tuned defaults for a class of source. The `webrip` profile targets transparent-quality x265 for WEB-DL/HDTV series — CRF 19–22, slow preset, psy-rd tuning, SAO off. Already-compressed sources need a *lower* CRF than their bitrate suggests, because generation loss compounds
 - **Downscaling**: Optionally reduce videos larger than 1080p while preserving aspect ratio
+
+### Audio & Subtitles
+- **All Tracks Preserved**: Every audio track survives re-encoding — commentary, foreign dubs, and descriptive audio included. FFmpeg's default behavior keeps only one track and silently drops the rest
+- **Lossless Audio by Default**: Audio is copied bit-exact (`--audio-codec copy`), so 5.1 stays 5.1 and nothing is re-compressed. Pass `--audio-codec aac` (or `eac3`, `ac3`, `opus`) if you'd rather shrink it
+- **Automatic Container Fallback**: Codecs MP4 can't hold (TrueHD, DTS-HD) are converted to E-AC-3 rather than failing the encode
+- **Subtitles and Chapters**: Text subtitles are converted to MP4's `mov_text`; chapter markers and language tags carry through. Bitmap subtitles (Blu-ray PGS) are dropped, as MP4 cannot store them
 
 ### macOS QuickLook Compatibility
 - **Instant Finder Previews**: Fixes videos that won't preview in macOS Finder/QuickLook
@@ -35,7 +42,7 @@ The core idea: you shouldn't need to manually audit thousands of video files to 
 
 ### Safety & Control
 - **Originals Preserved by Default**: Re-encoded files get a `_reencoded` suffix — originals are only deleted with explicit `--replace-original`
-- **Output Validation**: Every re-encoded file is validated (ffprobe readability, dimensions, duration match) before the original is touched
+- **Output Validation**: Every re-encoded file is validated (ffprobe readability, dimensions, duration match, audio track count) before the original is touched — an encode that lost an audio track fails validation, so `--replace-original` can never delete a source in favor of a silent file
 - **Deferred Replacement in Queue Mode**: When using `--replace-original` with `--queue-mode`, originals are never deleted during upload. Instead, a separate confirmation phase runs after the pipeline completes — each uploaded file is re-validated via ffprobe (video stream, duration match) before the original is deleted
 - **Review Before Replace**: `--replace-after-review` encodes everything first, shows a summary table with per-file sizes and compression %, then prompts before deleting originals — giving you a chance to spot-check the results
 - **Batch Control**: Filter by file type (`--file-types wmv,avi`), limit batch size (`--max-files 10`), or target specific codecs (`--target-codec av1`)
@@ -110,6 +117,12 @@ python video_sentinel.py /path/to/videos -r --check-specs --re-encode --file-typ
 
 # Test with a small batch first
 python video_sentinel.py /path/to/videos -r --check-specs --re-encode --max-files 5
+
+# Transcode a WEB-DL/HDTV series to x265 at transparent quality, audio untouched
+python video_sentinel.py /path/to/shows -r --check-specs --re-encode --profile webrip
+
+# Same, but shrink audio to AAC as well
+python video_sentinel.py /path/to/shows -r --check-specs --re-encode --profile webrip --audio-codec aac
 
 # Downscale 4K to 1080p during re-encode
 python video_sentinel.py /path/to/videos -r --check-specs --re-encode --downscale-1080p --replace-original

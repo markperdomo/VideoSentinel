@@ -43,12 +43,74 @@ class VideoEncoder:
         'veryslow': 'veryslow'
     }
 
+    # Audio codecs that can be muxed into MP4 without re-encoding.
+    # Anything outside this set must be transcoded when audio_codec='copy'.
+    MP4_AUDIO_CODECS = {
+        'aac', 'mp3', 'ac3', 'eac3', 'alac', 'opus', 'flac', 'mp2'
+    }
+
+    # Text-based subtitle codecs, convertible to MP4's mov_text.
+    # Bitmap subs (hdmv_pgs_subtitle, dvd_subtitle, dvb_subtitle) cannot be
+    # converted to text and are dropped from MP4 output.
+    TEXT_SUBTITLE_CODECS = {
+        'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text'
+    }
+
+    # Fallback encoder when 'copy' is requested but the source audio codec
+    # isn't MP4-compatible. eac3 preserves channel count up to 5.1.
+    COPY_FALLBACK_AUDIO = 'eac3'
+
+    # Encoding profiles: opinionated defaults for a known class of source.
+    # crf_offset shifts the bpp-derived CRF; crf_clamp bounds the result.
+    PROFILES = {
+        'webrip': {
+            'description': 'WEB-DL/HDTV series to x265 (transparent quality)',
+            # Already-lossy sources need a lower CRF than the bpp table
+            # suggests, since generation loss compounds.
+            'crf_offset': -4,
+            'crf_clamp': (19, 22),
+            'preset': 'slow',
+            'audio_codec': 'copy',
+            # Tuning for clean, low-grain digital sources. sao=0 avoids the
+            # smeared look SAO gives web content; aq-mode 3 helps dark scenes.
+            # NOTE: values must not contain ':' — ffmpeg joins these with ':'
+            # as the separator, so x265's native 'deblock=-1:-1' form would
+            # split into two broken params and swallow whatever follows.
+            # Use the comma form instead.
+            'x265_params': [
+                'aq-mode=3',
+                'psy-rd=2.0',
+                'psy-rdoq=1.0',
+                'rdoq-level=2',
+                'bframes=8',
+                'ref=5',
+                'rc-lookahead=40',
+                'deblock=-1,-1',
+                'sao=0',
+            ],
+        },
+    }
+
     def __init__(self, verbose: bool = False, recovery_mode: bool = False,
-                 downscale_1080p: bool = False, parallel: int = 1):
+                 downscale_1080p: bool = False, parallel: int = 1,
+                 profile: Optional[str] = None):
         self.verbose = verbose
         self.recovery_mode = recovery_mode
         self.downscale_1080p = downscale_1080p
         self.parallel = parallel
+        self.profile = profile
+        self.profile_settings = self.PROFILES.get(profile) if profile else None
+
+        # ffmpeg joins x265 params with ':', so a ':' inside a value silently
+        # corrupts the rest of the chain (x265 only warns on stderr).
+        if self.profile_settings:
+            for param in self.profile_settings.get('x265_params', []):
+                if ':' in param:
+                    raise ValueError(
+                        f"Profile '{profile}' x265 param {param!r} contains ':', "
+                        f"which ffmpeg treats as a separator. Use the comma form "
+                        f"(e.g. 'deblock=-1,-1')."
+                    )
 
     def _parse_time_to_seconds(self, time_str: str) -> float:
         """
@@ -196,20 +258,159 @@ class VideoEncoder:
             else:
                 crf = 26
 
+        base_crf = crf
+
+        # Apply profile adjustment. Re-encoding an already-lossy source needs a
+        # lower CRF than the bpp table implies, because the bpp reads "low
+        # quality source" when it really means "already compressed once".
+        if self.profile_settings:
+            crf += self.profile_settings.get('crf_offset', 0)
+            clamp = self.profile_settings.get('crf_clamp')
+            if clamp:
+                crf = max(clamp[0], min(clamp[1], crf))
+
+        crf = max(0, min(51, crf))
+
         if self.verbose:
-            console.print(f"  Quality analysis: {bpp:.4f} bpp \u2192 CRF {crf}", style="dim")
+            if self.profile_settings and crf != base_crf:
+                console.print(
+                    f"  Quality analysis: {bpp:.4f} bpp \u2192 CRF {base_crf} "
+                    f"\u2192 {crf} ({self.profile} profile)",
+                    style="dim"
+                )
+            else:
+                console.print(f"  Quality analysis: {bpp:.4f} bpp \u2192 CRF {crf}", style="dim")
             console.print(f"  Source: {bitrate/1000:.0f} kbps, {video_info.width}x{video_info.height}, {fps:.1f} fps", style="dim")
 
         return crf
+
+    def _probe_streams(self, input_path: Path) -> Optional[list]:
+        """
+        List all streams in a file via ffprobe
+
+        Returns:
+            List of stream dicts, or None if the file could not be probed
+        """
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_streams', str(input_path)
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                return None
+            return json.loads(result.stdout).get('streams', [])
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            return None
+
+    def _build_stream_args(
+        self,
+        input_path: Path,
+        audio_codec: str,
+        output_ext: str = '.mp4'
+    ) -> list:
+        """
+        Build explicit -map arguments preserving every usable stream
+
+        FFmpeg's default stream selection keeps only ONE audio and ONE subtitle
+        stream, which silently discards commentary tracks, foreign dubs and
+        descriptive audio. This maps them all explicitly.
+
+        Streams intentionally excluded:
+        - Attached cover art (disposition attached_pic) — bloats MP4, breaks some players
+        - Bitmap subtitles (PGS/VOBSUB) when writing MP4 — cannot convert to mov_text
+
+        Args:
+            input_path: Source file to probe
+            audio_codec: Requested audio codec ('copy' or an encoder name)
+            output_ext: Output container extension, decides subtitle handling
+
+        Returns:
+            List of ffmpeg arguments, including the audio codec selection.
+            Order matters: the global -c:a must precede any per-stream
+            -c:a:N override, otherwise ffmpeg's last-match-wins rule lets the
+            global setting clobber the override.
+        """
+        streams = self._probe_streams(input_path)
+        if streams is None:
+            if self.verbose:
+                console.print(
+                    "  Could not probe streams, falling back to default selection",
+                    style="dim"
+                )
+            return ['-c:a', audio_codec]
+
+        is_mp4 = output_ext.lower() in ('.mp4', '.m4v', '.mov')
+        args = []
+        audio_out_idx = 0
+        audio_overrides = []
+        dropped = []
+
+        for stream in streams:
+            idx = stream.get('index')
+            codec_type = stream.get('codec_type')
+            codec_name = (stream.get('codec_name') or '').lower()
+
+            if codec_type == 'video':
+                # Skip embedded cover art / thumbnails
+                if stream.get('disposition', {}).get('attached_pic'):
+                    continue
+                args.extend(['-map', f'0:{idx}'])
+
+            elif codec_type == 'audio':
+                args.extend(['-map', f'0:{idx}'])
+                # When copying, transcode streams the container can't hold
+                if (audio_codec == 'copy' and is_mp4
+                        and codec_name not in self.MP4_AUDIO_CODECS):
+                    audio_overrides.extend([
+                        f'-c:a:{audio_out_idx}', self.COPY_FALLBACK_AUDIO
+                    ])
+                    dropped.append(
+                        f"{codec_name} audio → {self.COPY_FALLBACK_AUDIO} "
+                        f"(not MP4-compatible)"
+                    )
+                audio_out_idx += 1
+
+            elif codec_type == 'subtitle':
+                if is_mp4 and codec_name not in self.TEXT_SUBTITLE_CODECS:
+                    dropped.append(f"{codec_name} subtitle (bitmap, MP4 can't hold it)")
+                    continue
+                args.extend(['-map', f'0:{idx}'])
+
+        # Global audio codec first, then per-stream overrides. ffmpeg resolves
+        # per-stream options by last match, so this order must not be swapped.
+        args.extend(['-c:a', audio_codec])
+        args.extend(audio_overrides)
+
+        # Subtitle codec: MP4 needs mov_text, MKV can copy as-is
+        if any(s.get('codec_type') == 'subtitle' for s in streams):
+            if is_mp4:
+                args.extend(['-c:s', 'mov_text'])
+            else:
+                args.extend(['-c:s', 'copy'])
+
+        # Preserve container metadata and chapter markers
+        args.extend(['-map_metadata', '0', '-map_chapters', '0'])
+
+        if dropped and self.verbose:
+            for msg in dropped:
+                console.print(f"  Note: {msg}", style="dim")
+
+        if self.verbose:
+            n_audio = sum(1 for s in streams if s.get('codec_type') == 'audio')
+            if n_audio > 1:
+                console.print(f"  Preserving {n_audio} audio tracks", style="dim")
+
+        return args
 
     def re_encode_video(
         self,
         input_path: Path,
         output_path: Path,
         target_codec: str = 'hevc',
-        preset: str = 'medium',
+        preset: Optional[str] = None,
         crf: Optional[int] = None,
-        audio_codec: str = 'aac',
+        audio_codec: Optional[str] = None,
         keep_original: bool = True,
         replace_original: bool = False,
         video_info: Optional[VideoInfo] = None,
@@ -225,10 +426,12 @@ class VideoEncoder:
             input_path: Path to input video file
             output_path: Path for output video file
             target_codec: Target codec (h264, hevc, av1)
-            preset: Encoding preset (fast, medium, slow, veryslow)
+            preset: Encoding preset (fast, medium, slow, veryslow).
+                    If None, uses the active profile's preset, else 'medium'.
             crf: Constant Rate Factor for quality (0-51, lower is better quality).
                  If None, automatically calculated based on source quality.
-            audio_codec: Audio codec to use
+            audio_codec: Audio codec to use. If None, uses the active profile's
+                         choice, else 'copy' (preserves original audio bit-exact).
             keep_original: Whether to keep the original file (deprecated, use replace_original)
             replace_original: If True, deletes source and renames output to match source filename
             video_info: VideoInfo object for smart quality matching (optional)
@@ -249,6 +452,13 @@ class VideoEncoder:
         if not ffmpeg_codec:
             console.print(f"[error]Error: Unknown codec: {target_codec}[/error]")
             return False
+
+        # Resolve settings: explicit argument > active profile > built-in default
+        profile = self.profile_settings or {}
+        if preset is None:
+            preset = profile.get('preset', 'medium')
+        if audio_codec is None:
+            audio_codec = profile.get('audio_codec', 'copy')
 
         # Calculate optimal CRF if not specified
         if crf is None:
@@ -350,12 +560,20 @@ class VideoEncoder:
                 if self.verbose:
                     console.print(f"  Large file ({file_size_gb:.1f}GB) - using memory-safe muxing queue", style="dim")
 
+            # Map every usable stream. Without this, ffmpeg's default selection
+            # keeps only one audio track and silently drops the rest.
+            output_ext = output_path.suffix or self.EXTENSION_MAP.get(
+                target_codec.lower(), '.mp4'
+            )
+            cmd.extend(self._build_stream_args(input_path, audio_codec, output_ext))
+
             # Continue with encoding parameters
+            # (audio codec is set by _build_stream_args above, so that its
+            # per-stream fallbacks aren't overridden by a later global -c:a)
             cmd.extend([
                 '-c:v', ffmpeg_codec,
                 '-preset', preset,
                 '-crf', str(crf),
-                '-c:a', audio_codec,
             ])
 
             # Note: FFmpeg's -threads flag is ignored by libx265 (x265 manages
@@ -369,7 +587,9 @@ class VideoEncoder:
             # Add audio filter to handle problematic channel layouts
             # This fixes issues like "Unsupported channel layout '6 channels'"
             # Try to map to 5.1, 5.1(side), or fall back to stereo
-            if self.recovery_mode:
+            # Not applicable when copying — ffmpeg rejects a filtergraph on a
+            # stream that isn't being re-encoded.
+            if self.recovery_mode and audio_codec != 'copy':
                 cmd.extend(['-af', 'aformat=channel_layouts=5.1|5.1(side)|stereo'])
 
             # Build the video filter chain
@@ -402,6 +622,19 @@ class VideoEncoder:
                 cmd.extend(['-movflags', 'faststart'])
                 # Build x265 params
                 x265_params = ['log-level=error']
+
+                # Profile tuning goes first: x265 applies the last occurrence of
+                # a duplicated key, so the memory-safe branches below still win
+                # on large files where they overlap (bframes, ref, rc-lookahead).
+                if self.profile_settings:
+                    profile_params = self.profile_settings.get('x265_params', [])
+                    x265_params.extend(profile_params)
+                    if self.verbose and profile_params:
+                        console.print(
+                            f"  Profile '{self.profile}': {' '.join(profile_params)}",
+                            style="dim"
+                        )
+
                 if is_very_large_file:
                     # Aggressive memory-safe settings for very large files (>10GB)
                     # bframes has quadratic memory impact, ref is linear per frame
@@ -745,7 +978,34 @@ class VideoEncoder:
                     console.print(f"  Validation failed: Invalid dimensions ({width}x{height})", style="dim")
                 return False
 
-            # Check 5: Compare duration with source (if available)
+            # Check 5: Audio streams survived the encode
+            # This gates --replace-original: without it, a file whose audio was
+            # dropped passes validation and the source gets deleted.
+            if source_info:
+                # Fall back to has_audio for entries cached before
+                # audio_stream_count existed.
+                expected_audio = source_info.audio_stream_count or (
+                    1 if source_info.has_audio else 0
+                )
+                if expected_audio > 0:
+                    output_audio = sum(
+                        1 for s in data.get('streams', [])
+                        if s.get('codec_type') == 'audio'
+                    )
+                    if output_audio < expected_audio:
+                        detail = (
+                            f"{output_path.name} has {output_audio} audio track(s), "
+                            f"source had {expected_audio}"
+                        )
+                        if lenient:
+                            # Recovery mode salvages broken files where audio may
+                            # genuinely be unrecoverable — warn, but accept.
+                            console.print(f"[warning]Audio loss (recovery mode): {detail}[/warning]")
+                        else:
+                            console.print(f"[error]Validation failed: {detail}[/error]")
+                            return False
+
+            # Check 6: Compare duration with source (if available)
             if source_info and source_info.duration > 0:
                 format_info = data.get('format', {})
                 output_duration = float(format_info.get('duration', 0))
@@ -1312,10 +1572,19 @@ class VideoEncoder:
             cmd = [
                 'ffmpeg',
                 '-i', str(input_path),
-                '-c', 'copy',  # Copy streams without re-encoding
+            ]
+
+            # Map all streams explicitly — a bare -c copy still uses ffmpeg's
+            # default selection, which keeps only one audio track.
+            cmd.extend(
+                self._build_stream_args(input_path, 'copy', output_path.suffix or '.mp4')
+            )
+
+            cmd.extend([
+                '-c:v', 'copy',  # Copy video without re-encoding
                 '-movflags', 'faststart',  # Move moov atom to beginning for fast preview
                 '-y',  # Overwrite output file if exists
-            ]
+            ])
 
             # For HEVC videos, fix the tag for Apple compatibility
             if fix_hevc_tag:

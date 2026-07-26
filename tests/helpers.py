@@ -18,6 +18,7 @@ def make_video_info(**overrides) -> VideoInfo:
         fps=24.0,
         has_audio=True,
         audio_codec="aac",
+        audio_stream_count=1,
         file_size=75_000_000,
         is_valid=True,
         error_message=None,

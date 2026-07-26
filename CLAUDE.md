@@ -52,7 +52,9 @@ VideoSentinel follows a modular architecture with clear separation of concerns:
 - Quality tiers: high bpp sources get lower CRF (better quality), low bpp sources get higher CRF
 - **Parallel encoding**: `--parallel N` encodes N files simultaneously with per-instance x265 thread constraints
 - **Session summary**: Rich table showing per-file original/output sizes, compression %, timing, and aggregated space savings
-- Validates output before considering encoding successful (checks file size, dimensions, duration)
+- **Stream preservation**: explicit `-map` args keep every audio track, text subtitle, and chapter marker
+- **Encoding profiles**: `--profile webrip` applies tuned defaults for a class of source (see Encoding Profiles below)
+- Validates output before considering encoding successful (checks file size, dimensions, duration, audio track count)
 - Automatically cleans up invalid outputs; preserves originals by default
 - Resume-safe: validates existing outputs and skips re-encoding if valid
 - Fast remux capability for QuickLook fixes
@@ -173,8 +175,60 @@ Before deleting or replacing files, the encoder validates outputs:
 1. File exists and size > 1KB
 2. `ffprobe` can read the file
 3. Has valid video stream with non-zero dimensions
-4. Duration matches source within ±2 seconds
-5. If validation fails, deletes invalid output and preserves original
+4. Output has at least as many audio streams as the source
+5. Duration matches source within ±2 seconds
+6. If validation fails, deletes invalid output and preserves original
+
+Check 4 exists specifically to gate `--replace-original`: without it, an encode that
+silently dropped audio would validate as good and the source would be deleted.
+In `--recover` (lenient) mode it warns instead of failing, since salvaging a
+corrupt file may legitimately lose audio.
+
+**Audio and Stream Handling**
+FFmpeg's default stream selection keeps only ONE audio and ONE subtitle stream,
+which silently discards commentary tracks, foreign dubs, and descriptive audio.
+`_build_stream_args()` probes the source and emits explicit `-map` arguments:
+
+- **All video streams** except embedded cover art (`disposition.attached_pic`)
+- **All audio streams**, defaulting to `-c:a copy` (bit-exact, no generation loss)
+- **Text subtitles** (`subrip`, `ass`, `mov_text`, `webvtt`) converted to `mov_text` for MP4, copied as-is for MKV
+- **Chapters and container metadata** via `-map_metadata 0 -map_chapters 0`
+
+Two container-driven exclusions when writing MP4:
+- Bitmap subtitles (PGS, VOBSUB, DVB) are dropped — they cannot convert to `mov_text`
+- Audio codecs MP4 can't hold (TrueHD, DTS-HD) fall back to `eac3` per-stream
+
+**Ordering constraint**: the global `-c:a` must be emitted *before* any per-stream
+`-c:a:N` override. FFmpeg resolves per-stream options by last match, so a trailing
+global `-c:a copy` would clobber the fallback. `_build_stream_args()` owns both, which
+is why `re_encode_video` does not add its own `-c:a`.
+
+**Known limitation**: MP4 does not store per-track titles the way MKV does. Track
+*languages* survive; the human-readable titles ("Director's Commentary") do not.
+
+**Encoding Profiles**
+`PROFILES` in `encoder.py` holds tuned defaults for a class of source. A profile sets
+`crf_offset` + `crf_clamp` (applied in `calculate_optimal_crf`), `preset`,
+`audio_codec`, and `x265_params`. Explicit CLI flags override the profile.
+
+`webrip` — WEB-DL/HDTV series to x265 at transparent quality:
+- CRF offset **−4**, clamped to **19–22**. The bpp table reads an already-compressed
+  source as "low quality, compress harder" (a 3.5 Mbps 1080p WEB-DL lands on CRF 23;
+  under ~2.5 Mbps it falls to 25–28) when it actually means "already squeezed once".
+  Generation loss compounds, so these need a *lower* CRF, not a higher one.
+- In practice most 1080p/720p web-rips land on **CRF 19–21** with the profile applied.
+- Preset `slow`, audio `copy`
+- x265: `aq-mode=3 psy-rd=2.0 psy-rdoq=1.0 rdoq-level=2 bframes=8 ref=5 rc-lookahead=40 deblock=-1,-1 sao=0`
+  (SAO off avoids the smeared look on clean digital sources; aq-mode 3 helps dark scenes)
+
+**Gotcha**: x265 param values must NOT contain `:` — ffmpeg joins params with `:` as
+the separator, so x265's native `deblock=-1:-1` form splits into two broken params and
+silently swallows everything after it (x265 only warns on stderr). Use `deblock=-1,-1`.
+`VideoEncoder.__init__` raises on any profile param containing `:`.
+
+Profile x265 params are emitted *before* the large-file memory-safe params, so on
+files >4GB the memory limits still win on the keys they share (`bframes`, `ref`,
+`rc-lookahead`) — x265 applies the last occurrence of a duplicated key.
 
 **Replace Original Mode with Smart Resume**
 When `--replace-original` flag is used, the encoder:
@@ -305,7 +359,9 @@ Supported: 40+ video formats including:
 - `keep_original=True`: Never deletes originals automatically (unless `--replace-original` is used)
 - `replace_original=False`: By default, keeps originals with `_reencoded` suffix
 - Output suffix: `_reencoded` to avoid overwriting sources
+- `audio_codec='copy'`: Audio is preserved bit-exact unless explicitly told otherwise
 - Duration tolerance: ±2 seconds when validating re-encoded videos
+- Audio tolerance: none — losing an audio track fails validation (except in `--recover` mode)
 - Timeout: 300 seconds (5 minutes) for integrity checks
 - Files are only deleted after successful encoding and validation
 
@@ -373,6 +429,16 @@ Duplicate quality ranking uses comprehensive scoring to prioritize the best file
 
 **Encoding Options**
 - `--target-codec {h264,hevc,av1}`: Target codec for re-encoding (default: hevc)
+- `--profile {webrip}`: Apply tuned defaults for a class of source
+  - `webrip`: WEB-DL/HDTV series to x265 at transparent quality (CRF 19–22, slow preset, psy-rd tuning, SAO off, audio copied)
+  - x265 tuning only applies when `--target-codec hevc`; CRF and preset still apply to other codecs (CLI warns)
+  - Individual flags override the profile
+- `--preset {fast,medium,slow,veryslow}`: FFmpeg encoding preset (default: medium, or the profile's setting)
+  - Previously hardcoded to `medium` with no way to change it from the CLI
+- `--audio-codec CODEC`: Audio codec for re-encoding (default: `copy`)
+  - `copy` preserves original audio bit-exact — no generation loss, no channel downmix
+  - Or name an encoder: `aac`, `eac3`, `ac3`, `opus`
+  - Streams MP4 can't hold (TrueHD, DTS-HD) fall back to `eac3` automatically when copying
 - `--downscale-1080p`: Downscale videos larger than 1080p to 1920x1080 while preserving aspect ratio
   - Uses two-stage FFmpeg scale filter for proper dimension handling
   - Only scales down, never upscales (videos ≤1080p are unchanged)

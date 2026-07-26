@@ -361,6 +361,31 @@ def main():
     )
 
     parser.add_argument(
+        '--profile',
+        choices=list(VideoEncoder.PROFILES.keys()),
+        help='Apply tuned defaults for a class of source. "webrip" targets '
+             'transparent-quality x265 for WEB-DL/HDTV series: CRF 19-22, slow '
+             'preset, psy-rd tuning, SAO off, audio copied. Individual flags '
+             '(--preset, --audio-codec) override the profile.'
+    )
+
+    parser.add_argument(
+        '--preset',
+        choices=['fast', 'medium', 'slow', 'veryslow'],
+        help='FFmpeg encoding preset, speed vs compression efficiency '
+             '(default: medium, or the active --profile setting)'
+    )
+
+    parser.add_argument(
+        '--audio-codec',
+        default=None,
+        help='Audio codec for re-encoding: "copy" (default) preserves the '
+             'original audio bit-exact, or name an encoder such as aac, eac3, '
+             'ac3, opus. Non-MP4-compatible streams fall back to eac3 '
+             'automatically when copying.'
+    )
+
+    parser.add_argument(
         '--output-dir',
         type=Path,
         help='Directory for re-encoded videos (default: same as source with _reencoded suffix)'
@@ -562,7 +587,8 @@ def main():
 
     # Check ffmpeg availability
     encoder = VideoEncoder(verbose=args.verbose, recovery_mode=args.recover,
-                           downscale_1080p=args.downscale_1080p, parallel=args.parallel)
+                           downscale_1080p=args.downscale_1080p, parallel=args.parallel,
+                           profile=args.profile)
     if not encoder.check_ffmpeg_available():
         console.print("[error]Error: ffmpeg is not installed or not in PATH[/error]", highlight=False)
         console.print("[error]Please install ffmpeg to use VideoSentinel[/error]", highlight=False)
@@ -581,6 +607,15 @@ def main():
         console.print("No specific paths or file list provided for processing (e.g., --clear-queue was used).")
 
     console.print(f"Target codec: [codec]{args.target_codec.upper()}[/codec]")
+    if args.profile:
+        profile_info = VideoEncoder.PROFILES[args.profile]
+        console.print(f"Profile: [codec]{args.profile}[/codec] — {profile_info['description']}")
+        if args.target_codec != 'hevc':
+            console.print(
+                f"[warning]Note: the {args.profile} profile's x265 tuning only "
+                f"applies to HEVC; CRF and preset still apply to "
+                f"{args.target_codec.upper()}[/warning]"
+            )
     console.print()
 
     # Initialize components
@@ -911,6 +946,8 @@ def main():
                             local_input,
                             local_output,
                             target_codec=args.target_codec,
+                            preset=args.preset,
+                            audio_codec=args.audio_codec,
                             video_info=video_info,
                             keep_original=True,  # Queue manager handles cleanup
                             replace_original=False,  # Queue manager handles replacement
@@ -997,6 +1034,8 @@ def main():
                             videos_to_encode,
                             output_dir=args.output_dir,
                             target_codec=args.target_codec,
+                            preset=args.preset,
+                            audio_codec=args.audio_codec,
                             video_infos=video_infos_dict,
                             replace_original=args.replace_original,
                             parallel=args.parallel
@@ -1153,6 +1192,8 @@ def main():
                             local_input,
                             local_output,
                             target_codec=args.target_codec,
+                            preset=args.preset,
+                            audio_codec=args.audio_codec,
                             video_info=video_info,
                             keep_original=True,
                             replace_original=False,
@@ -1268,6 +1309,8 @@ def main():
                             video_path,
                             output_path,
                             target_codec=args.target_codec,
+                            preset=args.preset,
+                            audio_codec=args.audio_codec,
                             video_info=video_info,
                             keep_original=not args.replace_original
                         )

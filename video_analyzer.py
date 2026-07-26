@@ -23,6 +23,7 @@ class VideoInfo:
     fps: float
     has_audio: bool
     audio_codec: Optional[str] = None
+    audio_stream_count: int = 0
     file_size: int = 0
     is_valid: bool = True
     error_message: Optional[str] = None
@@ -344,6 +345,12 @@ class VideoAnalyzer:
             # Audio information
             has_audio = audio_stream is not None
             audio_codec = audio_stream.get('codec_name') if audio_stream else None
+            # Full count matters for re-encode validation: a file can carry
+            # commentary and dub tracks alongside the primary one.
+            audio_stream_count = sum(
+                1 for s in data.get('streams', [])
+                if s.get('codec_type') == 'audio'
+            )
 
             return VideoInfo(
                 file_path=file_path,
@@ -357,6 +364,7 @@ class VideoAnalyzer:
                 fps=fps,
                 has_audio=has_audio,
                 audio_codec=audio_codec,
+                audio_stream_count=audio_stream_count,
                 file_size=file_size,
                 is_valid=True
             )
