@@ -41,18 +41,30 @@ echo ""
 echo "Installing Python dependencies..."
 pip3 install -r requirements.txt
 
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "======================================"
-    echo "Installation complete!"
-    echo "======================================"
-    echo ""
-    echo "Usage:"
-    echo "  python3 video_sentinel.py /path/to/videos"
-    echo ""
-    echo "For more examples, see example_usage.sh"
-else
+if [ $? -ne 0 ]; then
     echo ""
     echo "Error: Failed to install dependencies"
     exit 1
 fi
+
+# Offer to install zsh completions
+if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+    echo ""
+    read -p "Install zsh tab completions? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        bash "$(dirname "$0")/completions/install.sh"
+    else
+        echo "Skipped. Run completions/install.sh later to enable."
+    fi
+fi
+
+echo ""
+echo "======================================"
+echo "Installation complete!"
+echo "======================================"
+echo ""
+echo "Usage:"
+echo "  python3 video_sentinel.py /path/to/videos"
+echo ""
+echo "For more examples, see example_usage.sh"

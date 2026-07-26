@@ -1,0 +1,39 @@
+#compdef video_sentinel.py video-sentinel vs
+# Zsh completion for VideoSentinel.
+# The whole file is the body of function _video_sentinel (via autoload).
+
+_arguments -s -S \
+    '(-h --help)'{-h,--help}'[Show help message and exit]' \
+    '(-r --recursive)'{-r,--recursive}'[Recursively scan subdirectories]' \
+    '(-v --verbose)'{-v,--verbose}'[Enable verbose output]' \
+    '--file-list[Text file containing video paths (one per line)]:file list:_files' \
+    '--stats[Display codec/size statistics]' \
+    '--check-specs[Check if videos meet modern encoding specs]' \
+    '--find-duplicates[Find duplicates via perceptual hashing]' \
+    '--filename-duplicates[Find duplicates by filename only]' \
+    '--ignore-duration[Ignore duration when matching filename duplicates]' \
+    '--fix-quicklook[Fix macOS QuickLook compatibility]' \
+    '--force-remux-mkv[Force-remux all MKV files to MP4]' \
+    '--duplicate-action[Action for duplicate groups]:action:(report interactive auto-best)' \
+    '--check-issues[Detect encoding issues / corrupted files]' \
+    '--create-samples[Generate sample videos for unique permutations]' \
+    '--deep-scan[Deep integrity check (slower, full decode)]' \
+    '--re-encode[Re-encode videos that do not meet specs]' \
+    '--recover[Enable error-recovery flags during re-encoding]' \
+    '--downscale-1080p[Downscale videos larger than 1080p]' \
+    '--target-codec[Target codec for re-encoding]:codec:(h264 hevc av1)' \
+    '--profile[Tuned defaults for a class of source]:profile:((webrip\:"WEB-DL/HDTV series to x265 (transparent quality)"))' \
+    '--preset[FFmpeg encoding preset, speed vs compression]:preset:(fast medium slow veryslow)' \
+    '--audio-codec[Audio codec (copy preserves audio bit-exact)]:codec:(copy aac eac3 ac3 opus)' \
+    '--output-dir[Directory for re-encoded videos]:output dir:_files -/' \
+    '--file-types[Filter to file types, comma-separated (e.g. wmv,avi,mov)]:types:' \
+    '--max-files[Max files to process this run]:count:' \
+    '--replace-original[Replace originals after validation]' \
+    '--replace-after-review[Prompt before deleting originals after review]' \
+    '(--parallel -j)'{--parallel,-j}'[Encode N files in parallel]:N:' \
+    '--queue-mode[Enable 3-stage network queue pipeline]' \
+    '--temp-dir[Temp directory for queue mode]:temp dir:_files -/' \
+    '--max-temp-size[Max temp storage size in GB]:GB:' \
+    '--buffer-size[Files to buffer locally in queue mode]:count:' \
+    '--clear-queue[Clear queue state and temp files]' \
+    '*:path:_files'

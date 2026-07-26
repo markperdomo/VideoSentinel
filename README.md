@@ -78,6 +78,24 @@ cd VideoSentinel
 pip install -r requirements.txt
 ```
 
+### Zsh tab completion (optional)
+
+```bash
+./completions/install.sh
+source ~/.zshrc
+```
+
+This appends a single `source` line to `~/.zshrc` pointing at `completions/init.zsh`.
+Completions activate for `video_sentinel.py` and `monitor_queue.py` — tab through flags,
+choices (`--target-codec`, `--profile`, `--preset`, `--duplicate-action`), and paths. If you
+alias the tool to `vs` or `video-sentinel`, those get the same completions.
+
+The `source` line must come **after** whatever initializes zsh's completion system
+(oh-my-zsh, prezto, or your own `compinit` call). `init.zsh` reuses that setup instead of
+running `compinit` a second time, which would slow shell startup and write a competing
+`~/.zcompdump`. The installer appends to the end of `~/.zshrc`, so this is already true
+unless you move the line.
+
 ## Quick Start
 
 ### Scan and fix everything in one shot
